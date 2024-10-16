@@ -51,6 +51,8 @@ public class gol : NetworkBehaviour
         //ball.Respawn();
         playerRespawner.RespawnPlayersAfterGoal();
     }
+   
+
 
     [ServerRpc(RequireOwnership = false)]
     public void ResetScoreServerRpc()

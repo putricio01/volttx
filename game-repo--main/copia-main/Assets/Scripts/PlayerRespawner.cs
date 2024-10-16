@@ -13,8 +13,6 @@ public class PlayerRespawner : NetworkBehaviour
     public Transform playerTwoSpawnPoint; // Assign in the editor
     public Ball ball;
     
-    public gol lol;
-    public gol2 lol2;
 
     public void RespawnPlayersAfterGoal()
     {
@@ -28,14 +26,9 @@ public class PlayerRespawner : NetworkBehaviour
             RespawnPlayersServerRpc();
     }
 
-    public void pi()
-    {
+
     
-       lol.ResetScoreServerRpc();
-       lol2.ResetScoreServerRpc();
-       RespawnPlayersServerRpc();
-       ball.Respawn();
-    }    
+  
 
    // [ServerRpc]
     [ServerRpc(RequireOwnership = false)]

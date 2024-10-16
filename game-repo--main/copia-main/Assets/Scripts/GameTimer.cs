@@ -5,20 +5,25 @@ using Unity.Netcode;
 
 public class GameTimer : NetworkBehaviour
 {
+    public gol lol;
+    public gol2 lol2;
     public TMP_Text timerText;
-    private float timeRemaining; // No need to set here, as we will set it when the second player joins
+    //private float timeRemaining; // No need to set here, as we will set it when the second player joins
+    private NetworkVariable<float> timeRemaining = new NetworkVariable<float>(180f);
+
     private bool timerIsRunning = false;
-    public GameObject ball; // Assign the ball GameObject in the inspector
+    public Ball ball; // Assign the ball GameObject in the inspector
     public PlayerRespawner playerRespawner;
 
     private void Start()
     {
         NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
         // Initialize timer for 3 minutes when the second player joins
-        timeRemaining = 180f;
-        playerRespawner.pi();
+      
+     
         
     }
+   
 
     private void OnDestroy()
     {
@@ -35,15 +40,19 @@ public class GameTimer : NetworkBehaviour
         if (NetworkManager.Singleton.ConnectedClients.Count == 2)
         {
             timerIsRunning = true; // Start the timer
+            playerRespawner.RespawnPlayersAfterGoal();
+            lol.ResetScoreServerRpc();
+            lol2.ResetScoreServerRpc();
+
         }
         }
     }
 
     void Update()
     {
-        if (timerIsRunning && timeRemaining > 0)
+        if (timerIsRunning && timeRemaining.Value > 0)
         {
-            timeRemaining -= Time.deltaTime;
+            timeRemaining.Value -= Time.deltaTime;
             UpdateTimerDisplay();
         }
         else if (timerIsRunning)
@@ -55,9 +64,14 @@ public class GameTimer : NetworkBehaviour
 
     void UpdateTimerDisplay()
     {
-        int minutes = Mathf.FloorToInt(timeRemaining / 60);
-        int seconds = Mathf.FloorToInt(timeRemaining % 60);
-        timerText.text = $"{minutes:00}:{seconds:00}";
+        int minutes = Mathf.FloorToInt(timeRemaining.Value / 60);
+        int seconds = Mathf.FloorToInt(timeRemaining.Value % 60);
+        timeClientRpc(minutes,seconds);
+       // timerText.text = $"{minutes:00}:{seconds:00}";
+    }
+    [ClientRpc]
+    private void timeClientRpc(int min,int sec){
+        timerText.text = $"{min:00}:{sec:00}";
     }
 
     void EndGame()

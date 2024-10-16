@@ -25669,7 +25669,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 328035445
+  GlobalObjectIdHash: 3226981242
   InScenePlacedSourceGlobalObjectIdHash: 3226981242
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
@@ -25800,7 +25800,7 @@ Rigidbody:
   m_IsKinematic: 0
   m_Interpolate: 0
   m_Constraints: 0
-  m_CollisionDetection: 2
+  m_CollisionDetection: 0
 --- !u!114 &-3826878488546602712
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -27479,8 +27479,8 @@ MonoBehaviour:
   m_YAxis:
     Value: 0.5
     m_SpeedMode: 0
-    m_MaxSpeed: 0
-    m_AccelTime: 0.2
+    m_MaxSpeed: 100
+    m_AccelTime: 0.4
     m_DecelTime: 0.1
     m_InputAxisName: Mouse Y
     m_InputAxisValue: 0

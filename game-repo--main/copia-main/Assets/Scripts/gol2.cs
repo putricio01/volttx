@@ -53,6 +53,7 @@ public class gol2 : NetworkBehaviour
 
 
     }
+   
 
     [ServerRpc(RequireOwnership = false)]
     public void ResetScoreServerRpc()

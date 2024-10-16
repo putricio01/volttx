@@ -6,8 +6,8 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/trez8.unity
-    guid: 9d015f58289db4ac0bb58ba56370ebf8
+    path: Assets/mein.unity
+    guid: 353d22bc8f4054ddbb5b6cce4d9339e8
   m_configObjects:
     com.unity.input.settings: {fileID: 11400000, guid: 0d5eb283b9b9a4f96a5cf12538ab75d4,
       type: 2}
