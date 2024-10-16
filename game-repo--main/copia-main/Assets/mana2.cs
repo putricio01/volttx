@@ -41,9 +41,9 @@ namespace Kart {
             // Only show the login button at first, hide the others
             DontDestroyOnLoad(this);
             
-            createBetButton.gameObject.SetActive(false);
-            acceptBetButton.gameObject.SetActive(false);
-            loginButton.gameObject.SetActive(true); // Ensure login button is visible
+            createBetButton.gameObject.SetActive(true);
+            acceptBetButton.gameObject.SetActive(true);
+            loginButton.gameObject.SetActive(false); // Ensure login button is visible
         }
 
         public void Login()
