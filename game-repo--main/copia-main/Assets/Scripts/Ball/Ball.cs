@@ -72,11 +72,15 @@ public class Ball : NetworkBehaviour
         }
     }
 
-    private void OnCollisionEnter(Collision col)
+   private void OnCollisionEnter(Collision col)
+{
+    Rigidbody colRb = col.rigidbody;
+
+    if (colRb != null)
     {
-        float force = initialForce + col.rigidbody.velocity.magnitude * hitMultiplier;
-        //Vector3 dir = transform.position - col.contacts[0].point;
+        float force = initialForce + colRb.velocity.magnitude * hitMultiplier;
         var dir = transform.position - col.transform.position;
+
         if (col.gameObject.CompareTag("Player"))
         {
             var networkObject = col.gameObject.GetComponent<NetworkObject>();
@@ -85,24 +89,15 @@ public class Ball : NetworkBehaviour
                 RequestOwnershipServerRpc(networkObject.OwnerClientId);
             }
 
-
-
-
             _rb.AddForce(dir.normalized * force);
         }
-
-
-
-        if (col.gameObject.CompareTag("Ground"))
-            isTouchedGround = true;
-
-        //if (col.gameObject.tag == "Ground")
-        //    if (rb.velocity.y > 3)
-        //    {
-        //    //rb.AddForce(Vector3.up * -downForce);
-        //        rb.velocity = new Vector3(rb.velocity.x, rb.velocity.y - SlowVelocityGround, rb.velocity.z);
-        //    }
     }
+
+    if (col.gameObject.CompareTag("Ground"))
+    {
+        isTouchedGround = true;
+    }
+}
 
     //private void OnCollisionExit(Collision col)
     //{

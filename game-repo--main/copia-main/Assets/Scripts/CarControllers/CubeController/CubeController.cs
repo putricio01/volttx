@@ -43,6 +43,7 @@ public class CubeController : NetworkBehaviour
     {
         playerRespawner = FindObjectOfType<PlayerRespawner>();
         playerRespawner.Respawns.Insert((int)NetworkManager.LocalClientId, gameObject);
+        //playerRespawner.Respawns.Add(NetworkManager.LocalClientId, gameObject);
 
         _rb = GetComponent<Rigidbody>();
         _rb.centerOfMass = cogLow.localPosition;
