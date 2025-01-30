@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Netcode;
-//using Unity.Netcode;
+using UnityEngine.UI;
 
 public class InputManager : NetworkBehaviour
 {
@@ -11,23 +11,66 @@ public class InputManager : NetworkBehaviour
     public bool isBoost, isDrift, isAirRoll;
     public bool isJump, isJumpUp, isJumpDown;
     
+    // Flag to switch between joystick and keyboard input
+    public bool useJoystickInput = true; 
+
+    // Joystick values (set from UICanvasControllerInput)
+    public Vector2 joystickMoveInput = Vector2.zero;
+
+    public Button bust;
+    public Button jomp;
+
+    void Start()
+    {
+        // Automatically set useJoystickInput based on the platform
+        #if UNITY_ANDROID || UNITY_IOS
+            useJoystickInput = true;
+        #else
+            useJoystickInput = false;
+        #endif
+    }
+
     void Update()
     {
+        if (useJoystickInput)
+        {
+            // Use joystick values
+            Debug.Log("Using Joystick Input");
+            throttleInput = joystickMoveInput.y;
+            steerInput = joystickMoveInput.x;
+        }
+        else
+        {
+            // Use keyboard values (WASD)
+            Debug.Log("Using Keyboard Input");
+            throttleInput = GetThrottle();
+            steerInput = GetSteerInput();
+            isJump = Input.GetMouseButton(1) || Input.GetButton("A");
+            isJumpUp = Input.GetMouseButtonUp(1) || Input.GetButtonUp("A");
+            isJumpDown = Input.GetMouseButtonDown(1) || Input.GetButtonDown("A");
+            isBoost = Input.GetButton("RB") || Input.GetMouseButton(0);
+        }
 
-        throttleInput = GetThrottle();
-        steerInput = GetSteerInput();
-        
         yawInput = Input.GetAxis("Horizontal");
         pitchInput = Input.GetAxis("PitchAxis");
         rollInput = GetRollInput();
 
-        isJump = Input.GetMouseButton(1) || Input.GetButton("A");
-        isJumpUp = Input.GetMouseButtonUp(1) || Input.GetButtonUp("A");
-        isJumpDown = Input.GetMouseButtonDown(1) || Input.GetButtonDown("A");
-
-        isBoost = Input.GetButton("RB") || Input.GetMouseButton(0);
         isDrift = Input.GetButton("LB") || Input.GetKey(KeyCode.LeftShift);
         isAirRoll = Input.GetButton("LB") || Input.GetKey(KeyCode.LeftShift);
+    }
+
+    public void SetBoost(bool state)
+    {
+        isBoost = state;
+        Debug.Log($"SetBoost called with state: {state}. isBoost is now: {isBoost}");
+    }
+
+    public void OnJumpButtonClicked(bool state)
+    {
+        isJump = state;
+        isJumpUp = state;
+        isJumpDown = state;
+        Debug.Log("Jump button clicked. isJump is now: " + state);
     }
 
     private static float GetRollInput()
@@ -37,7 +80,6 @@ public class InputManager : NetworkBehaviour
             inputRoll = -1;
         else if (Input.GetKey(KeyCode.Q) || Input.GetButton("Y"))
             inputRoll = 1;
-
         return inputRoll;
     }
 
@@ -48,13 +90,11 @@ public class InputManager : NetworkBehaviour
             throttle = Mathf.Max(Input.GetAxis("Vertical"), Input.GetAxis("RT"));
         else if (Input.GetAxis("Vertical") < 0 || Input.GetAxis("LT") < 0)
             throttle = Mathf.Min(Input.GetAxis("Vertical"), Input.GetAxis("LT"));
-
         return throttle;
     }
 
     static float GetSteerInput()
     {
-        //return Mathf.MoveTowards(steerInput, Input.GetAxis("Horizontal"), Time.fixedDeltaTime);
         return Input.GetAxis("Horizontal");
     }
 
@@ -67,25 +107,6 @@ public class InputManager : NetworkBehaviour
         var target = Mathf.MoveTowards(_currentHorizontalInput, Input.GetAxis(axisName), Time.fixedDeltaTime / 25);
         _currentHorizontalInput = sensitivityCurve.Evaluate(Mathf.Abs(target));
         var ret = _currentHorizontalInput * Mathf.Sign(Input.GetAxis(axisName));
-        
-        // Debug.Log("Input: " + Input.GetAxis("Horizontal"));
-        // Debug.Log("Out: " + ret);
-        // Debug.Log("");
-
         return ret;
-
-        //var ret = sensitivityCurve.Evaluate(Mathf.Abs(Input.GetAxis(axisName)));
-        //return ret * Mathf.Sign(ret);
-
-        //var target = sensitivityCurve.Evaluate(Mathf.Abs(Input.GetAxis(axisName)));
-        //currentInput = Mathf.SmoothDamp(currentInput, target, ref vel, 1f, Mathf.Infinity, Time.fixedDeltaTime);
-        //return currentInput * Mathf.Sign(Input.GetAxis(axisName));
     }
-    /*
-    private void OnGUI()
-    {
-        GUILayout.HorizontalSlider(pitchInput, -1, 1, GUILayout.Width(200));
-        GUILayout.HorizontalSlider(yawInput, -1, 1, GUILayout.Width(200));
-        GUILayout.HorizontalSlider(rollInput, -1, 1, GUILayout.Width(200));
-    }*/
 }

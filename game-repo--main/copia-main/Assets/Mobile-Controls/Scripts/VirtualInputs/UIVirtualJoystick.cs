@@ -79,11 +79,38 @@ public class UIVirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandle
     }
 
     Vector2 ApplySizeDelta(Vector2 position)
+{
+    float x;  
+    if (position.x / containerRect.sizeDelta.x > 0)
     {
-        float x = (position.x/containerRect.sizeDelta.x) * 2.5f;
-        float y = (position.y/containerRect.sizeDelta.y) * 2.5f;
-        return new Vector2(x, y);
+        x = 1f;
     }
+    else if (position.x / containerRect.sizeDelta.x < 0)
+    {
+        x = -1f;
+    }
+    else
+    {
+        x = 0f;
+    }
+
+    float y;  
+    if (position.y / containerRect.sizeDelta.y > 0)
+    {
+        y = 1f;
+    }
+    else if (position.y / containerRect.sizeDelta.y < 0)
+    {
+        y = -1f;
+    }
+    else
+    {
+        y = 0f;
+    }
+
+    return new Vector2(x, y);
+}
+
 
     Vector2 ClampValuesToMagnitude(Vector2 position)
     {
