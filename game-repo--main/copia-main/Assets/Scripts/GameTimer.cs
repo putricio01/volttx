@@ -1,29 +1,28 @@
-
 using UnityEngine;
 using TMPro;
 using Unity.Netcode;
 
+/// <summary>
+/// Server-authoritative game timer. Only the server ticks the timer.
+/// Sends time updates to clients via ClientRpc.
+/// Starts when the second player joins (1v1 game).
+/// </summary>
 public class GameTimer : NetworkBehaviour
 {
     public gol lol;
     public gol2 lol2;
     public TMP_Text timerText;
-    //private float timeRemaining; // No need to set here, as we will set it when the second player joins
     private NetworkVariable<float> timeRemaining = new NetworkVariable<float>(180f);
 
     private bool timerIsRunning = false;
-    public Ball ball; // Assign the ball GameObject in the inspector
+    public Ball ball;
     public PlayerRespawner playerRespawner;
 
     private void Start()
     {
-        NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-        // Initialize timer for 3 minutes when the second player joins
-      
-     
-        
+        if (NetworkManager.Singleton != null)
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
     }
-   
 
     private void OnDestroy()
     {
@@ -35,21 +34,25 @@ public class GameTimer : NetworkBehaviour
 
     private void OnClientConnected(ulong clientId)
     {
-        if (IsServer){
-        // Check if this is the second player joining
+        if (!IsServer) return;
+
+        // Start when the second player joins
         if (NetworkManager.Singleton.ConnectedClients.Count == 2)
         {
-            timerIsRunning = true; // Start the timer
+            timeRemaining.Value = 180f; // Reset to 3 minutes
+            timerIsRunning = true;
             playerRespawner.RespawnPlayersAfterGoal();
             lol.ResetScoreServerRpc();
             lol2.ResetScoreServerRpc();
-
-        }
+            Debug.Log("[Server] Both players connected. Match starting!");
         }
     }
 
     void Update()
     {
+        // Only the server ticks the timer (guard against pre-spawn calls)
+        if (!IsSpawned || !IsServer) return;
+
         if (timerIsRunning && timeRemaining.Value > 0)
         {
             timeRemaining.Value -= Time.deltaTime;
@@ -57,8 +60,8 @@ public class GameTimer : NetworkBehaviour
         }
         else if (timerIsRunning)
         {
+            timerIsRunning = false;
             EndGame();
-            timerIsRunning = false; // Stop the timer
         }
     }
 
@@ -66,27 +69,50 @@ public class GameTimer : NetworkBehaviour
     {
         int minutes = Mathf.FloorToInt(timeRemaining.Value / 60);
         int seconds = Mathf.FloorToInt(timeRemaining.Value % 60);
-        timeClientRpc(minutes,seconds);
-       // timerText.text = $"{minutes:00}:{seconds:00}";
+        TimeUpdateClientRpc(minutes, seconds);
     }
+
     [ClientRpc]
-    private void timeClientRpc(int min,int sec){
-        timerText.text = $"{min:00}:{sec:00}";
+    private void TimeUpdateClientRpc(int min, int sec)
+    {
+        // Server doesn't have UI — only update on clients
+        if (IsServer && !IsHost) return;
+
+        if (timerText != null)
+            timerText.text = $"{min:00}:{sec:00}";
+    }
+
+    /// <summary>
+    /// Notify all clients the game is over before shutting down.
+    /// </summary>
+    [ClientRpc]
+    private void GameOverClientRpc()
+    {
+        // Server doesn't need game over UI
+        if (IsServer && !IsHost) return;
+
+        Debug.Log("[Client] Game over! Returning to menu...");
+        // TODO: Load menu scene or show game over UI
     }
 
     void EndGame()
-{
-    // Log out players and remove the ball
-    NetworkManager.Singleton.Shutdown();
-
-    if (ball != null)
     {
-        Destroy(ball); // This will remove the ball from the scene
+        Debug.Log("[Server] Match ended. Shutting down...");
+
+        // Notify clients before shutdown
+        GameOverClientRpc();
+
+        if (ball != null)
+        {
+            Destroy(ball.gameObject);
+        }
+
+        // Delay shutdown slightly so the ClientRpc has time to arrive
+        Invoke(nameof(ShutdownServer), 1f);
     }
 
-    // Optionally, you can also load a different scene or show a game over screen here.
-
-
-        // Optionally, you can also load a different scene or show a game over screen here.
+    void ShutdownServer()
+    {
+        NetworkManager.Singleton.Shutdown();
     }
 }

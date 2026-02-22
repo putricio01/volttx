@@ -7,10 +7,10 @@ public class DisableCanvasForWebGL : MonoBehaviour
 {
     void Awake()
     {
-        #if UNITY_WEBGL
-            gameObject.SetActive(false);
-        #else
+        #if UNITY_ANDROID || UNITY_IOS
             gameObject.SetActive(true);
+        #else
+            gameObject.SetActive(false);
         #endif
     }
 }

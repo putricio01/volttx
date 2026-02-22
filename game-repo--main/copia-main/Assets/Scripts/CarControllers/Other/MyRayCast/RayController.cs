@@ -72,7 +72,7 @@ public class RayController : MonoBehaviour
     void Steering()
     {
         steerInput = Input.GetAxis("Horizontal");
-        forwardSpeed = Vector3.Dot(rb.velocity, transform.forward);
+        forwardSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
         turnRadius = GetTurnRadius(Mathf.Abs(forwardSpeed)) * 0.6f;
         rearTrack = 0;
         if (steerInput > 0)
@@ -108,7 +108,7 @@ public class RayController : MonoBehaviour
     {
         if (Input.GetMouseButton(0))
         {
-            rb.drag = 0;
+            rb.linearDamping = 0;
             if (isBoostAnimationPlaying == false)
             {
                 BoostParticlesSystem.Play();
@@ -152,7 +152,7 @@ public class RayController : MonoBehaviour
         //if (rb.velocity.magnitude > maxSpeedNoBoost)
         //    rb.velocity = rb.velocity.normalized * maxSpeedNoBoost;
 
-        rb.drag = 0;
+        rb.linearDamping = 0;
         if (Input.GetAxis("Vertical") == 0 && Mathf.Abs(forwardSpeed) > 1 && !Input.GetKey(KeyCode.LeftShift) && isWheelsSurface)
         {
 
@@ -163,7 +163,7 @@ public class RayController : MonoBehaviour
 
         }
         else if (Input.GetAxis("Vertical") == 0 && Mathf.Abs(forwardSpeed) < 1 && !Input.GetKey(KeyCode.LeftShift) && isWheelsSurface)
-            rb.drag = 16;
+            rb.linearDamping = 16;
     }
 
     bool isFirstJumpTick = true;

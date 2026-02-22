@@ -41,7 +41,7 @@ public class AutoThrowBall : MonoBehaviour
     public void ShootTarget(Vector3 targetPos)
     {
         Vector3 dir = targetPos - transform.position;
-        _rb.velocity = dir.normalized * (Random.Range(speed.x, speed.y));
+        _rb.linearVelocity = dir.normalized * (Random.Range(speed.x, speed.y));
     }
 
     private void OnCollisionEnter(Collision other)

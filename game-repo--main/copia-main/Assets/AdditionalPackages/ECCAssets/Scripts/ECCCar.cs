@@ -71,7 +71,7 @@ public class ECCCar : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        Debug.Log(rb.velocity.magnitude);
+        Debug.Log(rb.linearVelocity.magnitude);
         //DetectGround();
         //rb.AddForce(Vector3.up * -downForce);
         rb.AddForce(Input.GetAxis("Vertical") * transform.forward * forwardToque);
@@ -91,9 +91,9 @@ public class ECCCar : MonoBehaviour
         //    GameObject.FindGameObjectWithTag("Ball").transform.position = transform.position + Vector3.up*2;
         //}
 
-        if (rb.velocity.magnitude > 23)
+        if (rb.linearVelocity.magnitude > 23)
         {
-            rb.velocity = rb.velocity.normalized * 23;
+            rb.linearVelocity = rb.linearVelocity.normalized * 23;
         }
     }
 
@@ -136,7 +136,7 @@ public class ECCCar : MonoBehaviour
                 if (index < frontWheels) wheels[index].localEulerAngles = Vector3.up * Mathf.LerpAngle(wheels[index].localEulerAngles.y, rotateDirection * driftAngle, Time.deltaTime * 10);
 
                 // Spin the wheel
-                wheels[index].Find("WheelObject").Rotate(Vector3.right * Time.deltaTime * rb.velocity.magnitude * 20, Space.Self);
+                wheels[index].Find("WheelObject").Rotate(Vector3.right * Time.deltaTime * rb.linearVelocity.magnitude * 20, Space.Self);
             }
         }
         else // Otherwise, if we are no longer rotating, straighten up the car and front wheels
@@ -154,7 +154,7 @@ public class ECCCar : MonoBehaviour
                 if (index < frontWheels) wheels[index].localEulerAngles = Vector3.up * Mathf.LerpAngle(wheels[index].localEulerAngles.y, 0, Time.deltaTime * 5);
 
                 // Spin the wheel faster
-                wheels[index].Find("WheelObject").Rotate(Vector3.right * Time.deltaTime * transform.InverseTransformDirection(rb.velocity).z * 300, Space.Self);
+                wheels[index].Find("WheelObject").Rotate(Vector3.right * Time.deltaTime * transform.InverseTransformDirection(rb.linearVelocity).z * 300, Space.Self);
                 //drawString(rb.velocity.z.ToString(), transform.position + Vector3.up, Color.black);
                 //drawString(transform.InverseTransformDirection(rb.velocity).z.ToString(), transform.position + Vector3.up*2, Color.black);
             }

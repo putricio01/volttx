@@ -1,102 +1,310 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
+using Solana.Unity.Programs;
 using Solana.Unity.Rpc.Builders;
 using Solana.Unity.Rpc.Models;
-using Solana.Unity.Wallet;
-using Solana.Unity.SDK;
-using System.Text;
-using TtGame;
-using TtGame.Program;
 using Solana.Unity.Rpc.Types;
-using Solana.Unity.Programs;
+using Solana.Unity.SDK;
+using Solana.Unity.Wallet;
+using SolanaGame.Program;
 using UnityEngine;
 
-public class ttservise : MonoBehaviour 
+public class ttservise : MonoBehaviour
 {
-    // Set your Program ID
-    public static PublicKey ProgramId = new PublicKey("GvgvNoQLrtqQsp1XYJ2hNQ3tgXCreeHMWSpLaSTQ9cj9");
+    public static readonly PublicKey ProgramId = new PublicKey("3abFWCLDDyA2jHfnGLQUTX6W9jddXSMHt9jtyc6Xjfjc");
 
-    // Ensure Web3 instance exists
-    private Web3 web3;
+    private static readonly byte[] GameSeedBytes = Encoding.UTF8.GetBytes(GameProgramInstructions.GameSeed);
+    private static readonly byte[] VaultSeedBytes = Encoding.UTF8.GetBytes(GameProgramInstructions.VaultSeed);
 
-    public void Awake()
+    public string LastGameAddress { get; private set; }
+    public string LastVaultAddress { get; private set; }
+    public string LastSignature { get; private set; }
+
+    private void Awake()
     {
         if (Web3.Instance == null)
         {
             Debug.LogError("Web3 instance is not initialized.");
-            return;
         }
-        web3 = Web3.Instance;
-    }
-
-    public void Start()
-    {
-        // Initialize or do any setup if needed
     }
 
     public async Task<bool> CreateGameTransaction(ulong entryAmount)
     {
-        try {
-            // Define accounts
-            var gameAccount = new Account();  // New Game account
-            var creatorAccount = Web3.Account;  // Creator of the game (Web3.Account is assumed to be initialized)
+        if (entryAmount == 0)
+        {
+            Debug.LogError("Entry amount must be greater than zero.");
+            return false;
+        }
 
-            // Prepare the transaction builder
+        if (!TryGetActiveAccount(out var player1))
+            return false;
+
+        var authority = player1.PublicKey;
+        if (!TryDeriveGamePda(player1.PublicKey, authority, out var gamePda))
+        {
+            Debug.LogError("Failed to derive game PDA.");
+            return false;
+        }
+
+        if (!TryDeriveVaultPda(gamePda, out var vaultPda))
+        {
+            Debug.LogError("Failed to derive vault PDA.");
+            return false;
+        }
+
+        LastGameAddress = gamePda.Key;
+        LastVaultAddress = vaultPda.Key;
+
+        var accounts = new CreateGameAccounts
+        {
+            Player1 = player1.PublicKey,
+            Authority = authority,
+            Game = gamePda,
+            Vault = vaultPda,
+            SystemProgram = SystemProgram.ProgramIdKey
+        };
+
+        var builder = new TransactionBuilder()
+            .SetFeePayer(player1)
+            .AddInstruction(GameProgramInstructions.CreateGame(accounts, entryAmount, ProgramId));
+
+        return await SignAndSendAsync(builder, new List<Account> { player1 }, "create_game");
+    }
+
+    public async Task<bool> JoinGameTransaction(string gameAddress)
+    {
+        if (!TryGetActiveAccount(out var player2))
+            return false;
+
+        if (!TryParsePublicKey(gameAddress, "gameAddress", out var gamePda))
+            return false;
+
+        if (!TryDeriveVaultPda(gamePda, out var vaultPda))
+        {
+            Debug.LogError("Failed to derive vault PDA.");
+            return false;
+        }
+
+        var accounts = new JoinGameAccounts
+        {
+            Player2 = player2.PublicKey,
+            Game = gamePda,
+            Vault = vaultPda,
+            SystemProgram = SystemProgram.ProgramIdKey
+        };
+
+        var builder = new TransactionBuilder()
+            .SetFeePayer(player2)
+            .AddInstruction(GameProgramInstructions.JoinGame(accounts, ProgramId));
+
+        return await SignAndSendAsync(builder, new List<Account> { player2 }, "join_game");
+    }
+
+    public async Task<bool> SettleGameTransaction(string gameAddress, string winnerAddress)
+    {
+        if (!TryGetActiveAccount(out var authority))
+            return false;
+
+        if (!TryParsePublicKey(gameAddress, "gameAddress", out var gamePda))
+            return false;
+
+        if (!TryParsePublicKey(winnerAddress, "winnerAddress", out var winner))
+            return false;
+
+        if (!TryDeriveVaultPda(gamePda, out var vaultPda))
+        {
+            Debug.LogError("Failed to derive vault PDA.");
+            return false;
+        }
+
+        var accounts = new SettleGameAccounts
+        {
+            Game = gamePda,
+            Vault = vaultPda,
+            Winner = winner,
+            Authority = authority.PublicKey,
+            SystemProgram = SystemProgram.ProgramIdKey
+        };
+
+        var builder = new TransactionBuilder()
+            .SetFeePayer(authority)
+            .AddInstruction(GameProgramInstructions.SettleGame(accounts, winner, ProgramId));
+
+        return await SignAndSendAsync(builder, new List<Account> { authority }, "settle_game");
+    }
+
+    public async Task<bool> RefundGameTransaction(
+        string gameAddress,
+        string player1Address,
+        string player2Address,
+        bool player2MustSign,
+        Account player2Signer = null)
+    {
+        if (!TryGetActiveAccount(out var signer))
+            return false;
+
+        if (!TryParsePublicKey(gameAddress, "gameAddress", out var gamePda))
+            return false;
+
+        if (!TryParsePublicKey(player1Address, "player1Address", out var player1))
+            return false;
+
+        if (!TryParsePublicKey(player2Address, "player2Address", out var player2))
+            return false;
+
+        if (signer.PublicKey.Key != player1.Key)
+        {
+            Debug.LogError("Active wallet must match player1 for refund.");
+            return false;
+        }
+
+        if (!TryDeriveVaultPda(gamePda, out var vaultPda))
+        {
+            Debug.LogError("Failed to derive vault PDA.");
+            return false;
+        }
+
+        var accounts = new RefundAccounts
+        {
+            Game = gamePda,
+            Vault = vaultPda,
+            Player1 = player1,
+            Player2 = player2,
+            SystemProgram = SystemProgram.ProgramIdKey
+        };
+
+        var builder = new TransactionBuilder()
+            .SetFeePayer(signer)
+            .AddInstruction(GameProgramInstructions.Refund(accounts, player2MustSign, ProgramId));
+
+        var signers = new List<Account> { signer };
+        if (player2MustSign)
+        {
+            if (signer.PublicKey.Key == player2.Key)
+            {
+                return await SignAndSendAsync(builder, signers, "refund");
+            }
+
+            if (player2Signer == null)
+            {
+                Debug.LogError("Joined-state refund requires an additional signer for player2.");
+                return false;
+            }
+
+            if (player2Signer.PublicKey.Key != player2.Key)
+            {
+                Debug.LogError("player2Signer does not match player2Address.");
+                return false;
+            }
+
+            signers.Add(player2Signer);
+        }
+
+        return await SignAndSendAsync(builder, signers, "refund");
+    }
+
+    public bool TryDeriveGameAndVaultAddresses(
+        string player1Address,
+        string authorityAddress,
+        out string gameAddress,
+        out string vaultAddress)
+    {
+        gameAddress = string.Empty;
+        vaultAddress = string.Empty;
+
+        if (!TryParsePublicKey(player1Address, "player1Address", out var player1))
+            return false;
+        if (!TryParsePublicKey(authorityAddress, "authorityAddress", out var authority))
+            return false;
+        if (!TryDeriveGamePda(player1, authority, out var gamePda))
+            return false;
+        if (!TryDeriveVaultPda(gamePda, out var vaultPda))
+            return false;
+
+        gameAddress = gamePda.Key;
+        vaultAddress = vaultPda.Key;
+        return true;
+    }
+
+    private async Task<bool> SignAndSendAsync(TransactionBuilder builder, List<Account> signers, string instructionName)
+    {
+        try
+        {
             var blockHashResult = await Web3.Rpc.GetLatestBlockHashAsync();
-            if (blockHashResult.WasSuccessful && blockHashResult.Result != null)
+            if (!blockHashResult.WasSuccessful || blockHashResult.Result == null)
             {
-                var blockHash = blockHashResult.Result.Value.Blockhash;
-                var transactionBuilder = new TransactionBuilder()
-                    .SetRecentBlockHash(blockHash)
-                    .SetFeePayer(creatorAccount);  // Fee payer is the creator
-
-                // Define the CreateGame accounts
-                var createGameAccounts = new TtGame.Program.CreateGameAccounts
-                {
-                    Game = gameAccount.PublicKey,
-                    Creator = creatorAccount.PublicKey,
-                    SystemProgram = SystemProgram.ProgramIdKey
-                };
-
-                // Add the createGame instruction to the transaction with dynamic entryAmount
-                transactionBuilder.AddInstruction(TtGame.Program.TtGameProgram.CreateGame(
-                    createGameAccounts,
-                    entryAmount,  // Dynamically use the passed entryAmount
-                    ProgramId
-                ));
-
-                // Build and sign the transaction
-                var tx = Transaction.Deserialize(transactionBuilder.Build(new List<Account> { creatorAccount, gameAccount }));
-
-                // Sign and send the transaction
-                var res = await Web3.Wallet.SignAndSendTransaction(tx);
-
-                // Show Confirmation
-                if (res?.Result != null)
-                {
-                    await Web3.Rpc.ConfirmTransaction(res.Result, Commitment.Confirmed);
-                    Debug.Log("Game created, see transaction at https://explorer.solana.com/tx/" 
-                              + res.Result + "?cluster=" + Web3.Wallet.RpcCluster.ToString().ToLower());
-
-                    return true;
-                }
-                else
-                {
-                    Debug.LogError("Transaction failed.");
-                    return false;  // Return failure
-                }
+                Debug.LogError("Failed to get latest blockhash: " + blockHashResult.Reason);
+                return false;
             }
-            else
+
+            builder.SetRecentBlockHash(blockHashResult.Result.Value.Blockhash);
+
+            var tx = Transaction.Deserialize(builder.Build(signers));
+            var sendResult = await Web3.Wallet.SignAndSendTransaction(tx);
+            if (sendResult?.Result == null)
             {
-                Debug.LogError("Failed to get latest block hash: " + blockHashResult.Reason);
-                return false;  // Return failure
+                Debug.LogError($"Transaction failed for {instructionName}.");
+                return false;
             }
+
+            LastSignature = sendResult.Result;
+            await Web3.Rpc.ConfirmTransaction(sendResult.Result, Commitment.Confirmed);
+
+            var cluster = Web3.Wallet.RpcCluster.ToString().ToLowerInvariant();
+            Debug.Log(
+                $"{instructionName} confirmed: https://explorer.solana.com/tx/{sendResult.Result}?cluster={cluster}");
+            return true;
         }
         catch (Exception e)
         {
-            Debug.LogError("Error during CreateGameTransaction: " + e.Message);
-            return false;  // Return failure
+            Debug.LogError($"Error sending {instructionName} transaction: {e.Message}");
+            return false;
         }
+    }
+
+    private static bool TryGetActiveAccount(out Account account)
+    {
+        account = Web3.Account;
+        if (Web3.Instance == null || Web3.Wallet == null || Web3.Rpc == null || account == null)
+        {
+            Debug.LogError("Web3 wallet is not ready.");
+            return false;
+        }
+        return true;
+    }
+
+    private static bool TryParsePublicKey(string value, string label, out PublicKey key)
+    {
+        try
+        {
+            key = new PublicKey(value);
+            return true;
+        }
+        catch (Exception e)
+        {
+            key = default(PublicKey);
+            Debug.LogError($"Invalid {label}: {e.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryDeriveGamePda(PublicKey player1, PublicKey authority, out PublicKey gamePda)
+    {
+        return PublicKey.TryFindProgramAddress(
+            new[] { GameSeedBytes, player1.KeyBytes, authority.KeyBytes },
+            ProgramId,
+            out gamePda,
+            out _);
+    }
+
+    private static bool TryDeriveVaultPda(PublicKey gamePda, out PublicKey vaultPda)
+    {
+        return PublicKey.TryFindProgramAddress(
+            new[] { VaultSeedBytes, gamePda.KeyBytes },
+            ProgramId,
+            out vaultPda,
+            out _);
     }
 }

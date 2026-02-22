@@ -2,15 +2,20 @@ using UnityEngine;
 using Cinemachine;
 using UnityEngine.EventSystems;
 
+/// <summary>
+/// Client-only: Disables Cinemachine input when interacting with UI.
+/// Safe on server (null-checks prevent errors when cameras/UI are disabled).
+/// </summary>
 public class CinemachineInputManager : MonoBehaviour
 {
-    public CinemachineFreeLook freeLookCamera; // Reference to your Cinemachine FreeLook camera
+    public CinemachineFreeLook freeLookCamera;
 
     private bool isUIInteracting;
 
     void Update()
     {
-        // Check if the pointer is over a UI element
+        if (freeLookCamera == null || EventSystem.current == null) return;
+
         if (EventSystem.current.IsPointerOverGameObject())
         {
             if (!isUIInteracting)
@@ -31,13 +36,13 @@ public class CinemachineInputManager : MonoBehaviour
 
     private void DisableCinemachineInput()
     {
-        freeLookCamera.m_XAxis.m_InputAxisName = string.Empty; // Disable X-axis mouse input
-        freeLookCamera.m_YAxis.m_InputAxisName = string.Empty; // Disable Y-axis mouse input
+        freeLookCamera.m_XAxis.m_InputAxisName = string.Empty;
+        freeLookCamera.m_YAxis.m_InputAxisName = string.Empty;
     }
 
     private void EnableCinemachineInput()
     {
-        freeLookCamera.m_XAxis.m_InputAxisName = "Mouse X"; // Restore X-axis input
-        freeLookCamera.m_YAxis.m_InputAxisName = "Mouse Y"; // Restore Y-axis input
+        freeLookCamera.m_XAxis.m_InputAxisName = "Mouse X";
+        freeLookCamera.m_YAxis.m_InputAxisName = "Mouse Y";
     }
 }

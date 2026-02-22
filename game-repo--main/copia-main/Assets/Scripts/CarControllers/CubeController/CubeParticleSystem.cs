@@ -1,9 +1,12 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-
+/// <summary>
+/// Car particle/trail effects — purely visual, client-only.
+/// Null-checks prevent errors on server where particles are disabled.
+/// </summary>
 public class CubeParticleSystem : MonoBehaviour
 {
     public ParticleSystem windPs, boostPs;
@@ -11,34 +14,44 @@ public class CubeParticleSystem : MonoBehaviour
 
     const int SupersonicThreshold = 2200 / 100;
     CubeController _controller;
+    InputManager _inputManager;
     private TrailRenderer[] _trails;
     bool _isBoostAnimationPlaying = false;
 
     void Start()
     {
         _controller = GetComponentInParent<CubeController>();
+        _inputManager = GetComponentInParent<InputManager>();
         _trails = GetComponentsInChildren<TrailRenderer>();
+
+        if (_trails == null || _trails.Length < 2 || windPs == null || boostPs == null)
+        {
+            enabled = false;
+            return;
+        }
+
         _trails[0].time = _trails[1].time = 0;
-        firePs.SetActive(false);
+        if (firePs != null) firePs.SetActive(false);
 
         windPs.transform.position += new Vector3(0, 0, 10);
     }
 
     void Update()
     {
-        if (GameManager.InputManager.isBoost)
+        if (_inputManager == null) return;
+        if (_inputManager.isBoost)
         {
             if (_isBoostAnimationPlaying == false)
             {
-                boostPs.Play();
-                firePs.SetActive(true);
+                if (boostPs != null) boostPs.Play();
+                if (firePs != null) firePs.SetActive(true);
                 _isBoostAnimationPlaying = true;
             }
         }
-        else if (!GameManager.InputManager.isBoost)
+        else if (!_inputManager.isBoost)
         {
-            boostPs.Stop();
-            firePs.SetActive(false);
+            if (boostPs != null) boostPs.Stop();
+            if (firePs != null) firePs.SetActive(false);
             _isBoostAnimationPlaying = false;
         }
     }
@@ -47,21 +60,22 @@ public class CubeParticleSystem : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (_controller == null || _trails == null || _trails.Length < 2) return;
+
         //  Wind and trail effect
         if (_controller.forwardSpeed >= SupersonicThreshold)
         {
-            windPs.Play();
-            
+            if (windPs != null) windPs.Play();
+
             if (_controller.isAllWheelsSurface)
                 _trails[0].time = _trails[1].time = Mathf.Lerp(_trails[1].time, TrailLength, Time.fixedDeltaTime * 5);
-            else 
+            else
                 _trails[0].time = _trails[1].time = 0;
         }
-        
         else
         {
-            windPs.Stop();
-            
+            if (windPs != null) windPs.Stop();
+
             _trails[0].time = _trails[1].time = Mathf.Lerp(_trails[1].time, 0.029f, Time.fixedDeltaTime * 6);
             if (_trails[0].time <= 0.03f)
                 _trails[0].time = _trails[1].time = 0;

@@ -13,7 +13,8 @@ public class CubeAirControl : NetworkBehaviour
     
     Rigidbody _rb;
     CubeController _controller;
-    
+    InputManager _inputManager;
+
     #region Torque Coefficients for rotation and drag
     const float Tr = 36.07956616966136f; // torque coefficient for roll
     const float Tp = 12.14599781908070f; // torque coefficient for pitch
@@ -27,15 +28,17 @@ public class CubeAirControl : NetworkBehaviour
     {
         _rb = GetComponentInParent<Rigidbody>();
         _controller = GetComponent<CubeController>();
+        _inputManager = GetComponent<InputManager>();
     }
 
     void Update()
     {
-        _inputYaw = GameManager.InputManager.yawInput;
-        _inputPitch = GameManager.InputManager.pitchInput;
-        _inputRoll = GameManager.InputManager.rollInput;
+        if (_inputManager == null) return;
+        _inputYaw = _inputManager.yawInput;
+        _inputPitch = _inputManager.pitchInput;
+        _inputRoll = _inputManager.rollInput;
 
-        if (GameManager.InputManager.isAirRoll)
+        if (_inputManager.isAirRoll)
         {
             _inputRoll = -_inputYaw;
             _inputYaw = 0;

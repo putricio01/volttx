@@ -18,12 +18,13 @@ public class CubeWheel : MonoBehaviour
     Rigidbody _rb;
     CubeController _c;
     CubeGroundControl _groundControl;
-    
+    InputManager _inputManager;
+
     float _wheelRadius, _wheelForwardVelocity, _wheelLateralVelocity;
     Vector3 _wheelVelocity, _lastWheelVelocity, _wheelAcceleration, _wheelContactPoint, _lateralForcePosition = Vector3.zero;
-    
+
     const float AutoBrakeAcceleration = 5.25f;
-    
+
     //[HideInInspector]
     public bool isDrawWheelVelocities, isDrawWheelDisc, isDrawForces;
 
@@ -31,7 +32,8 @@ public class CubeWheel : MonoBehaviour
     {
         _rb = GetComponentInParent<Rigidbody>();
         _c = GetComponentInParent<CubeController>();
-        _groundControl= GetComponentInParent<CubeGroundControl>();
+        _groundControl = GetComponentInParent<CubeGroundControl>();
+        _inputManager = GetComponentInParent<InputManager>();
         _wheelRadius = transform.localScale.z / 2;
     }
     
@@ -54,6 +56,8 @@ public class CubeWheel : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (_rb == null || _rb.isKinematic) return;
+
         UpdateWheelState();
 
         if (!_c.isCanDrive) return;
@@ -64,11 +68,17 @@ public class CubeWheel : MonoBehaviour
     
     public void ApplyForwardForce(float force)
     {
+        if (_rb == null || _rb.isKinematic) return;
+
         _rb.AddForce(force * transform.forward, ForceMode.Acceleration);
         
-        // Kill velocity to 0 for small car velocities
+        // Kill forward velocity for small car velocities
         if (force == 0 && _c.forwardSpeedAbs < 0.1)
-            _rb.velocity = new Vector3(_rb.velocity.x, _rb.velocity.y, 0);
+        {
+            // Remove the forward component of velocity in local space
+            var forwardComponent = Vector3.Dot(_rb.linearVelocity, _c.transform.forward) * _c.transform.forward;
+            _rb.linearVelocity -= forwardComponent;
+        }
     }
     
     private void ApplyLateralForce()
@@ -84,10 +94,12 @@ public class CubeWheel : MonoBehaviour
     {
         //Applies auto braking if no input, simulates air and ground drag
         if (!(_c.forwardSpeedAbs >= 0.1)) return;
-        
-        //TODO Make a separate function
-        var dragForce = AutoBrakeAcceleration / 4 * _c.forwardSpeedSign * (1 - Mathf.Abs(GameManager.InputManager.throttleInput));
-        _rb.AddForce(-dragForce * transform.forward, ForceMode.Acceleration);
+
+        if (_inputManager == null) return;
+        var throttleFactor = 1 - Mathf.Abs(_inputManager.throttleInput);
+        // Drag always opposes the current direction of motion
+        var dragForce = AutoBrakeAcceleration / 4 * throttleFactor;
+        _rb.AddForce(-_c.forwardSpeedSign * dragForce * transform.forward, ForceMode.Acceleration);
     }
 
     private void UpdateWheelState()

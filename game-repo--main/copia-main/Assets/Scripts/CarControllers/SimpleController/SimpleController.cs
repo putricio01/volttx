@@ -15,8 +15,8 @@ public class SimpleController : MonoBehaviour
 
     private void FixedUpdate()
     {
-        velForward = Vector3.Dot(_rb.velocity, transform.forward);
+        velForward = Vector3.Dot(_rb.linearVelocity, transform.forward);
         velForward = (float)Math.Round(velForward, 2);
-        velMagn = _rb.velocity.magnitude;
+        velMagn = _rb.linearVelocity.magnitude;
     }
 }

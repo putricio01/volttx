@@ -51,7 +51,7 @@ public class SphereController : MonoBehaviour
         {
             if (Input.GetKeyDown(KeyCode.F))
             {
-                rb.AddForce(rb.velocity.normalized * JumpStrength);
+                rb.AddForce(rb.linearVelocity.normalized * JumpStrength);
                 
 //                rb.AddForce(new Vector3(0, JumpStrength, 0));
             }
@@ -94,7 +94,7 @@ public class SphereController : MonoBehaviour
     private void OnCollisionEnter(Collision col)
     {
         if (col.gameObject.tag == "Ground")
-                rb.velocity = new Vector3(rb.velocity.x, 0, rb.velocity.z);
+                rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0, rb.linearVelocity.z);
     }
 
     private void OnCollisionStay(Collision collision)

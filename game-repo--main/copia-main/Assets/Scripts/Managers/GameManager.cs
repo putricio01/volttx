@@ -1,17 +1,14 @@
-﻿using UnityEngine;
-//using Unity.Netcode;
+using UnityEngine;
 
-[RequireComponent(typeof(InputManager))]
 public class GameManager : MonoBehaviour
 {
-    public static InputManager InputManager;
     public static AudioManager AudioManager;
-    
+
     void Awake()
     {
-        InputManager = GetComponent<InputManager>();
+        // AudioManager is client-only — safe to always try GetComponent
+        // (will be null on server which is fine, callers should null-check)
         AudioManager = GetComponent<AudioManager>();
         //DontDestroyOnLoad(gameObject);
     }
-
 }

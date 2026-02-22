@@ -12,24 +12,13 @@ public class WalletInfoDisplay : MonoBehaviour
     public TMP_Text walletAddressText;
     //public Text walletBalanceText;
 
-    private async void Start()
+    private void Start()
     {
-        // Get the wallet account from Web3 instance
-        var creatorAccount = Web3.Account;
-        
-        if (creatorAccount != null)
-        {
-            // Display wallet address
-            walletAddressText.text = "Wallet Address: " + creatorAccount.PublicKey.ToString();
-
-            // Fetch and display wallet balance
-            //var balance = await Web3.Instance.WalletBase.GetBalance(Commitment.Confirmed);
-            //walletBalanceText.text = "Wallet Balance: " + balance.ToString() + " SOL";
-        }
-        else
-        {
+        // Solana wallet display disabled for now — enable when wallet integration is ready
+        if (walletAddressText != null)
             walletAddressText.text = "Wallet not connected";
-            //walletBalanceText.text = "";
-        }
+
+        // Disable this component since Solana isn't active yet
+        enabled = false;
     }
 }

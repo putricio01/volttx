@@ -82,12 +82,12 @@ public class HoverCarControl : MonoBehaviour
 		var emissionRate = 0;
 		if(grounded)
 		{
-			body.drag = groundedDrag;
+			body.linearDamping = groundedDrag;
 			emissionRate = 10;
 		}
 		else
 		{
-			body.drag = 0.1f;
+			body.linearDamping = 0.1f;
 			thrust /= 100f;
 			turnValue /= 100f;
 		}
@@ -112,9 +112,9 @@ public class HoverCarControl : MonoBehaviour
     }
 
 	// Limit max velocity
-	if(body.velocity.sqrMagnitude > (body.velocity.normalized * maxVelocity).sqrMagnitude)
+	if(body.linearVelocity.sqrMagnitude > (body.linearVelocity.normalized * maxVelocity).sqrMagnitude)
 	{
-		body.velocity = body.velocity.normalized * maxVelocity;
+		body.linearVelocity = body.linearVelocity.normalized * maxVelocity;
 	}
   }
 	// Uncomment this to see a visual indication of the raycast hit points in the editor window

@@ -20,11 +20,19 @@ public class CubeJumping : NetworkBehaviour
 
     Rigidbody _rb;
     CubeController _controller;
-   
+    InputManager _inputManager;
+
+    // Exposed for server reconciliation state capture/restore
+    public float jumpTimer { get => _jumpTimer; set => _jumpTimer = value; }
+    public bool isJumping { get => _isJumping; set => _isJumping = value; }
+    public bool isCanFirstJump { get => _isCanFirstJump; set => _isCanFirstJump = value; }
+    public bool isCanKeepJumping { get => _isCanKeepJumping; set => _isCanKeepJumping = value; }
+
     void Start()
     {
         _rb = GetComponentInParent<Rigidbody>();
         _controller = GetComponent<CubeController>();
+        _inputManager = GetComponent<InputManager>();
     }
 
     private void FixedUpdate()
@@ -35,42 +43,47 @@ public class CubeJumping : NetworkBehaviour
 
     private void Jump()
     {
+        if (_inputManager == null) return;
+
+         // Determine jump direction: use world-up when car is flipped, local-up otherwise
+        bool isFlipped = Vector3.Dot(Vector3.up, transform.up) < 0f;
+        Vector3 jumpDir = isFlipped ? Vector3.up : transform.up;
+ 
         // Do initial jump impulse only once
-        // TODO: Currently bugged, should be .isJumpDown for the initial jump impulse.
-        // Right now does the whole jump impulse
-        if (GameManager.InputManager.isJump && _isCanFirstJump)
+        if (_inputManager.isJump && _isCanFirstJump)
         {
-            _rb.AddForce(transform.up * 292 / 100 * jumpForceMultiplier, ForceMode.VelocityChange);
+            _rb.AddForce(jumpDir * 240 / 100 * jumpForceMultiplier, ForceMode.VelocityChange);
             _isCanKeepJumping = true;
             _isCanFirstJump = false;
             _isJumping = true;
-            
+ 
             _jumpTimer += Time.fixedDeltaTime;
         }
-        
-        // Keep jumping if the jump button is being pressed
-        if (GameManager.InputManager.isJump && _isJumping && _isCanKeepJumping && _jumpTimer <= 0.2f)
+ 
+        // Keep jumping if the jump button is being pressed (shorter hold window)
+        if (_inputManager.isJump && _isJumping && _isCanKeepJumping && _jumpTimer <= 0.15f)
         {
-            _rb.AddForce(transform.up * 1458f / 100 * jumpForceMultiplier, ForceMode.Acceleration);
+            _rb.AddForce(jumpDir * 1200f / 100 * jumpForceMultiplier, ForceMode.Acceleration);
             _jumpTimer += Time.fixedDeltaTime;
         }
-        
+ 
         // If jump button was released we can't start jumping again mid air
-        if (GameManager.InputManager.isJumpUp)
+        if (_inputManager.isJumpUp)
             _isCanKeepJumping = false;
-        
-        // Reset jump flags when landed
-        if (_controller.isAllWheelsSurface)
+ 
+        // Reset jump flags when landed (wheels on surface OR body on surface)
+        bool isTouchingSurface = _controller.isAllWheelsSurface || _controller.isBodySurface;
+        if (isTouchingSurface)
         {
-            // Need a timer, otherwise while jumping we are setting isJumping flag to false right on the next frame 
+            // Need a timer, otherwise while jumping we are setting isJumping flag to false right on the next frame
             if (_jumpTimer >= 0.1f)
                 _isJumping = false;
-
+ 
             _jumpTimer = 0;
             _isCanFirstJump = true;
         }
         // Cant start jumping while in the air
-        else if (!_controller.isAllWheelsSurface)
+        else if (!isTouchingSurface)
             _isCanFirstJump = false;
     }
 
@@ -79,7 +92,7 @@ public class CubeJumping : NetworkBehaviour
     {
         if (_controller.carState != CubeController.CarStates.BodyGroundDead) return;
         
-        if (GameManager.InputManager.isJumpDown || Input.GetButtonDown("A"))
+        if (_inputManager.isJumpDown || Input.GetButtonDown("A"))
         {
             _rb.AddForce(Vector3.up * upForce, ForceMode.VelocityChange);
             _rb.AddTorque(transform.forward * upTorque, ForceMode.VelocityChange);

@@ -1,11 +1,10 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using Unity.Netcode;
 using TMPro;
 
-
+/// <summary>
+/// Goal trigger for Player One's goal. Server-authoritative scoring.
+/// </summary>
 public class gol : NetworkBehaviour
 {
     private NetworkVariable<int> score = new NetworkVariable<int>();
@@ -22,37 +21,45 @@ public class gol : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Only the server detects goals (server runs authoritative ball physics).
+    /// </summary>
     private void OnTriggerEnter(Collider other)
     {
+        if (!IsServer) return;
+
         if (other.CompareTag("Ball"))
         {
-            //ball.ResetOwnershipToHostServerRpc();
-            IncrementScoreServerRpc();
+            score.Value += 1;
             ball.Respawn();
+            UpdateScoreClientRpc(score.Value);
         }
     }
 
     [ServerRpc(RequireOwnership = false)]
     public void IncrementScoreServerRpc()
     {
-        if (ball.Respawn()){
-        score.Value += 1;
-       
+        if (ball.Respawn())
+        {
+            score.Value += 1;
         }
         UpdateScoreClientRpc(score.Value);
-       
     }
 
     [ClientRpc]
     private void UpdateScoreClientRpc(int newScore)
     {
-        scoreText.text = "playerOne:-" + newScore.ToString();
-        
-        //ball.Respawn();
-        playerRespawner.RespawnPlayersAfterGoal();
-    }
-   
+        // Update UI only on clients (server has no UI in headless/editor-server mode)
+        if (!IsServer || IsHost)
+        {
+            if (scoreText != null)
+                scoreText.text = "playerOne:-" + newScore.ToString();
+        }
 
+        // Respawn is server-only — avoid double-call from clients
+        if (IsServer)
+            playerRespawner.RespawnPlayersAfterGoal();
+    }
 
     [ServerRpc(RequireOwnership = false)]
     public void ResetScoreServerRpc()
@@ -60,39 +67,4 @@ public class gol : NetworkBehaviour
         score.Value = 0;
         UpdateScoreClientRpc(score.Value);
     }
-   
 }
-
-
-
-    /*
-    private void OnTriggerEnter(Collider other)
-{
- 
-    if (other.CompareTag("Ball"))
-    {
-       
-       
-            // goal scored
-            //score++;
-            score.Value = score.Value + 1;
-            ball.Respawn();
-            playerRespawner.RespawnPlayersAfterGoal();
-        UpdateScoreText(); 
-    }
-    
-
-}
-public void UpdateScoreText()
-    {
-        scoreText.text = "playerOne:-" + score.Value.ToString();
-    }
-
-public void reset()
-    {
-        score.Value = 0;
-        UpdateScoreText(); 
-    }
-
-*/
-

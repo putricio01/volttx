@@ -1,5 +1,7 @@
 {
   "fd83c0dc5465c4a828f4f323325839e2": "Assets/666.unity",
+  "bfc68fb70d47c42808b8592af509ead9": "Assets/_Recovery/0 (1).unity",
+  "bc5913736060d43b6aaa39efba2b4672": "Assets/_Recovery/0.unity",
   "414bddd31c5ea4f4c9f5d1452e5bbb41": "Assets/AdditionalPackages/Joystick Pack/Examples/Example Scene.unity",
   "938ace6a044a848858364788d9cac322": "Assets/AdditionalPackages/RobotSphere/Demo/Scenes/Robot Animations Demo.unity",
   "353d22bc8f4054ddbb5b6cce4d9339e8": "Assets/mein.unity",
@@ -73,6 +75,9 @@
   "3b38a6ba32b869f48812e595baf39746": "Assets/TextMesh Pro/Examples & Extras/Scenes/27 - Double Pass Shader Example.unity",
   "eea2b7206368b444e84fbec4ec32b64a": "Assets/TextMesh Pro/Examples & Extras/Scenes/28 - HDRP Shader Example.unity",
   "16177da2e3254cee91944756d5f8ddd3": "Assets/TextMesh Pro/Examples & Extras/Scenes/Benchmark (Floating Text).unity",
+  "ba0100ff267da43d49597843dec26a16": "Assets/trez8.unity",
   "d45c09a54b1da466ab6c385ee45fd3e4": "Packages/com.unity.netcode.gameobjects/Tests/Editor/Build/BuildTestScene.unity",
-  "89b708238bc1f40f29451cf2329913f7": "Packages/com.unity.learn.iet-framework/Tests/Editor/EmptyTestScene.unity"
+  "14fc8b46bbbe44c8384c288cda0b3a64": "Packages/com.unity.xr.core-utils/Tests/Runtime/Scenes/ConvexHullPerformanceTest.unity",
+  "a401cbed40abb430895eec5ceb8b5353": "Packages/com.unity.xr.core-utils/Tests/Runtime/Scenes/CustomApproximatelyPerformanceTest.unity",
+  "d469f69adcddc4b1a91654a826f73b4d": "Packages/com.unity.xr.core-utils/Tests/Runtime/Scenes/PointInPolygonPerformanceTest.unity"
 }
