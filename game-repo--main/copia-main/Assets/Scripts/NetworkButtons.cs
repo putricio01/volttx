@@ -88,19 +88,7 @@ public class NetworkButtons : MonoBehaviour
                 }
             }
 
-            if (GUILayout.Button("Create Lobby"))
-            {
-                TransportConfig.ApplyTransportConfig();
-                if (Kart.Multiplayer.Instance != null)
-                    _ = Kart.Multiplayer.Instance.CreateLobby();
-            }
-
-            if (GUILayout.Button("Join Lobby"))
-            {
-                TransportConfig.ApplyTransportConfig();
-                if (Kart.Multiplayer.Instance != null)
-                    _ = Kart.Multiplayer.Instance.QuickJoinLobby();
-            }
+           
 #endif
         }
         else
