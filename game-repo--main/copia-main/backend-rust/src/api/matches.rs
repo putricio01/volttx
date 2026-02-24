@@ -3,10 +3,12 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::Utc;
+use chrono::{Duration, TimeZone, Utc};
+use solana_sdk::pubkey::Pubkey;
 
 use crate::{
     app_state::AppState,
+    db::chain_jobs as chain_jobs_db,
     db::matches as matches_db,
     error::AppError,
     models::{
@@ -17,7 +19,10 @@ use crate::{
         },
         enums::{ChainJobStatus, ChainJobType, MatchStatus, ResultOutcome},
     },
-    solana::pda::derive_match_pdas,
+    solana::{
+        client::fetch_and_decode_game_account, game_account::DecodedGameState,
+        pda::derive_match_pdas,
+    },
 };
 
 pub fn router() -> Router<AppState> {
@@ -92,28 +97,39 @@ async fn create_match(
 }
 
 async fn get_match_by_code(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(join_code): Path<String>,
 ) -> Result<Json<MatchLookupByCodeResponse>, AppError> {
+    let join_code = join_code.trim().to_ascii_uppercase();
     if join_code.is_empty() {
         return Err(AppError::BadRequest("join_code is required".into()));
     }
 
-    // TODO: load match from DB by join_code.
+    let row = matches_db::get_match_lookup_by_join_code(&state.pool, &join_code)
+        .await?
+        .ok_or_else(|| AppError::NotFound("match".into()))?;
+
+    if matches!(
+        row.match_status,
+        MatchStatus::Settled | MatchStatus::Refunded
+    ) {
+        return Err(AppError::Conflict("match is no longer active".into()));
+    }
+
     Ok(Json(MatchLookupByCodeResponse {
-        match_id: "0".into(),
-        join_code,
-        game_pda: "TODO_GAME_PDA".into(),
-        vault_pda: "TODO_VAULT_PDA".into(),
-        player1_pubkey: "TODO_PLAYER1".into(),
-        entry_lamports: "0".into(),
-        match_status: MatchStatus::CreatedOnChain,
-        join_expires_at: None,
+        match_id: row.match_id.to_string(),
+        join_code: row.join_code,
+        game_pda: row.game_pda,
+        vault_pda: row.vault_pda,
+        player1_pubkey: row.player1_pubkey,
+        entry_lamports: row.entry_lamports.to_string(),
+        match_status: row.match_status,
+        join_expires_at: row.join_expires_at,
     }))
 }
 
 async fn confirm_create_tx(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(match_id): Path<String>,
     Json(payload): Json<CreateConfirmRequest>,
 ) -> Result<Json<CreateConfirmResponse>, AppError> {
@@ -121,18 +137,86 @@ async fn confirm_create_tx(
         return Err(AppError::BadRequest("create_tx_sig is required".into()));
     }
 
-    // TODO: verify on-chain Game account at expected PDA and update DB state.
+    let match_id_i64 = parse_match_id(&match_id)?;
+    let row = matches_db::get_match_for_create_confirm(&state.pool, match_id_i64)
+        .await?
+        .ok_or_else(|| AppError::NotFound("match".into()))?;
+
+    // Idempotent path: once create was already verified (or match progressed), return current state.
+    if !matches!(row.match_status, MatchStatus::WaitingCreateTx) {
+        return Ok(Json(CreateConfirmResponse {
+            match_id: row.match_id.to_string(),
+            verified: true,
+            match_status: row.match_status,
+            create_tx_sig: row
+                .create_tx_sig
+                .unwrap_or_else(|| payload.create_tx_sig.clone()),
+            join_expires_at: row.join_expires_at,
+        }));
+    }
+
+    let decoded = fetch_and_decode_game_account(
+        &state.config.solana_rpc_url,
+        &state.config.program_id,
+        &row.game_pda,
+    )
+    .await
+    .map_err(|e| AppError::BadRequest(format!("failed to verify on-chain game account: {e}")))?;
+
+    if decoded.state != DecodedGameState::Created {
+        return Err(AppError::Conflict(
+            "game account is not in Created state".into(),
+        ));
+    }
+    if decoded.player1.to_string() != row.player1_pubkey {
+        return Err(AppError::Conflict(
+            "game.player1 does not match backend record".into(),
+        ));
+    }
+    if decoded.authority.to_string() != row.authority_pubkey {
+        return Err(AppError::Conflict(
+            "game.authority does not match backend record".into(),
+        ));
+    }
+    if decoded.match_id != row.match_id as u64 {
+        return Err(AppError::Conflict(
+            "game.match_id does not match backend record".into(),
+        ));
+    }
+    if decoded.entry_amount != row.entry_lamports as u64 {
+        return Err(AppError::Conflict(
+            "game.entry_amount does not match backend record".into(),
+        ));
+    }
+
+    let created_onchain_at = Utc
+        .timestamp_opt(decoded.created_at, 0)
+        .single()
+        .ok_or_else(|| AppError::Internal("invalid on-chain created_at timestamp".into()))?;
+    let join_expires_at = created_onchain_at + Duration::seconds(state.config.join_timeout_seconds);
+
+    let updated = matches_db::mark_match_created_on_chain(
+        &state.pool,
+        row.match_id,
+        &payload.create_tx_sig,
+        created_onchain_at,
+        join_expires_at,
+    )
+    .await?;
+
     Ok(Json(CreateConfirmResponse {
-        match_id,
-        verified: false,
-        match_status: MatchStatus::CreatedOnChain,
-        create_tx_sig: payload.create_tx_sig,
-        join_expires_at: None,
+        match_id: updated.match_id.to_string(),
+        verified: true,
+        match_status: updated.match_status,
+        create_tx_sig: updated
+            .create_tx_sig
+            .unwrap_or_else(|| payload.create_tx_sig.clone()),
+        join_expires_at: updated.join_expires_at,
     }))
 }
 
 async fn confirm_join_tx(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(match_id): Path<String>,
     Json(payload): Json<JoinConfirmRequest>,
 ) -> Result<Json<JoinConfirmResponse>, AppError> {
@@ -140,14 +224,110 @@ async fn confirm_join_tx(
         return Err(AppError::BadRequest("join_tx_sig is required".into()));
     }
 
-    // TODO: verify on-chain joined state, capture player2 pubkey, update DB.
+    let match_id_i64 = parse_match_id(&match_id)?;
+    let row = matches_db::get_match_for_join_confirm(&state.pool, match_id_i64)
+        .await?
+        .ok_or_else(|| AppError::NotFound("match".into()))?;
+
+    if !matches!(row.match_status, MatchStatus::CreatedOnChain) {
+        if matches!(
+            row.match_status,
+            MatchStatus::JoinedOnChain
+                | MatchStatus::InProgress
+                | MatchStatus::ResultPendingFinalize
+                | MatchStatus::Finalizing
+                | MatchStatus::Settled
+                | MatchStatus::Refunded
+        ) {
+            let player2_pubkey = row.player2_pubkey.ok_or_else(|| {
+                AppError::Conflict("match is past join stage but player2 is missing".into())
+            })?;
+            return Ok(Json(JoinConfirmResponse {
+                match_id: row.match_id.to_string(),
+                verified: true,
+                match_status: row.match_status,
+                player2_pubkey,
+                join_tx_sig: row.join_tx_sig.unwrap_or(payload.join_tx_sig),
+                settle_expires_at: row.settle_expires_at,
+            }));
+        }
+
+        return Err(AppError::Conflict(
+            "match is not ready for join-confirm (create not verified yet)".into(),
+        ));
+    }
+
+    let decoded = fetch_and_decode_game_account(
+        &state.config.solana_rpc_url,
+        &state.config.program_id,
+        &row.game_pda,
+    )
+    .await
+    .map_err(|e| AppError::BadRequest(format!("failed to verify on-chain game account: {e}")))?;
+
+    if decoded.state != DecodedGameState::Joined {
+        return Err(AppError::Conflict(
+            "game account is not in Joined state".into(),
+        ));
+    }
+    if decoded.player1.to_string() != row.player1_pubkey {
+        return Err(AppError::Conflict(
+            "game.player1 does not match backend record".into(),
+        ));
+    }
+    if decoded.authority.to_string() != row.authority_pubkey {
+        return Err(AppError::Conflict(
+            "game.authority does not match backend record".into(),
+        ));
+    }
+    if decoded.match_id != row.match_id as u64 {
+        return Err(AppError::Conflict(
+            "game.match_id does not match backend record".into(),
+        ));
+    }
+    if decoded.entry_amount != row.entry_lamports as u64 {
+        return Err(AppError::Conflict(
+            "game.entry_amount does not match backend record".into(),
+        ));
+    }
+    if decoded.player2 == Pubkey::default() {
+        return Err(AppError::Conflict(
+            "game.player2 is still default pubkey".into(),
+        ));
+    }
+    if decoded.player2 == decoded.player1 {
+        return Err(AppError::Conflict(
+            "game.player2 cannot equal game.player1".into(),
+        ));
+    }
+
+    let joined_onchain_at = Utc
+        .timestamp_opt(decoded.joined_at, 0)
+        .single()
+        .ok_or_else(|| AppError::Internal("invalid on-chain joined_at timestamp".into()))?;
+    let settle_expires_at =
+        joined_onchain_at + Duration::seconds(state.config.settle_timeout_seconds);
+    let player2_pubkey = decoded.player2.to_string();
+
+    let updated = matches_db::mark_match_joined_on_chain(
+        &state.pool,
+        row.match_id,
+        &player2_pubkey,
+        &payload.join_tx_sig,
+        joined_onchain_at,
+        settle_expires_at,
+    )
+    .await?;
+
     Ok(Json(JoinConfirmResponse {
-        match_id,
-        verified: false,
-        match_status: MatchStatus::JoinedOnChain,
-        player2_pubkey: "TODO_PLAYER2".into(),
-        join_tx_sig: payload.join_tx_sig,
-        settle_expires_at: None,
+        match_id: updated.match_id.to_string(),
+        verified: true,
+        match_status: updated.match_status,
+        player2_pubkey: updated
+            .player2_pubkey
+            .unwrap_or_else(|| player2_pubkey.clone()),
+        join_tx_sig: updated.join_tx_sig.unwrap_or(payload.join_tx_sig),
+        settle_expires_at: updated.settle_expires_at,
     }))
 }
 
@@ -158,62 +338,132 @@ async fn submit_result(
 ) -> Result<Json<ResultResponse>, AppError> {
     validate_internal_headers_stub(&state)?;
 
-    match payload.outcome {
+    let match_id_i64 = parse_match_id(&match_id)?;
+    let idempotency_key = payload.idempotency_key.trim();
+    if idempotency_key.is_empty() {
+        return Err(AppError::BadRequest("idempotency_key is required".into()));
+    }
+    let reason_code = payload.reason_code.trim();
+    if reason_code.is_empty() {
+        return Err(AppError::BadRequest("reason_code is required".into()));
+    }
+    let reason_detail = payload
+        .reason_detail
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+
+    let match_row = matches_db::get_match_status_record(&state.pool, match_id_i64)
+        .await?
+        .ok_or_else(|| AppError::NotFound("match".into()))?;
+
+    if matches!(
+        match_row.match_status,
+        MatchStatus::WaitingCreateTx | MatchStatus::CreatedOnChain
+    ) {
+        return Err(AppError::Conflict(
+            "match is not ready for result submission".into(),
+        ));
+    }
+
+    let winner_pubkey = match payload.outcome {
         ResultOutcome::Winner => {
-            if payload.winner_pubkey.as_deref().unwrap_or("").is_empty() {
+            let winner = payload.winner_pubkey.as_deref().unwrap_or("").trim();
+            if winner.is_empty() {
                 return Err(AppError::BadRequest(
                     "winner_pubkey is required when outcome=winner".into(),
                 ));
             }
+            let player2 = match_row
+                .player2_pubkey
+                .as_deref()
+                .ok_or_else(|| AppError::Conflict("match has no player2 recorded yet".into()))?;
+            if winner != match_row.player1_pubkey && winner != player2 {
+                return Err(AppError::Conflict(
+                    "winner_pubkey must match player1 or player2".into(),
+                ));
+            }
+            Some(winner.to_string())
         }
-        ResultOutcome::Broken => {}
-    }
-    if payload.idempotency_key.is_empty() {
-        return Err(AppError::BadRequest("idempotency_key is required".into()));
-    }
+        ResultOutcome::Broken => {
+            if payload
+                .winner_pubkey
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|s| !s.is_empty())
+            {
+                return Err(AppError::BadRequest(
+                    "winner_pubkey must be omitted when outcome=broken".into(),
+                ));
+            }
+            None
+        }
+    };
 
-    // TODO: enqueue chain_jobs row (settle or force_refund) and update matches state.
     let finalization_action = match payload.outcome {
         ResultOutcome::Winner => ChainJobType::Settle,
         ResultOutcome::Broken => ChainJobType::ForceRefund,
     };
+    let persisted = chain_jobs_db::persist_result_and_enqueue(
+        &state.pool,
+        chain_jobs_db::PersistResultAndEnqueueParams {
+            match_id: match_id_i64,
+            job_type: finalization_action,
+            winner_pubkey,
+            reason_code: reason_code.to_string(),
+            reason_detail,
+            idempotency_key: idempotency_key.to_string(),
+        },
+    )
+    .await?;
 
     Ok(Json(ResultResponse {
-        match_id,
-        match_status: MatchStatus::ResultPendingFinalize,
-        finalization_action,
-        chain_job_status: ChainJobStatus::Pending,
+        match_id: match_id_i64.to_string(),
+        match_status: persisted.match_status,
+        finalization_action: persisted.chain_job_type,
+        chain_job_status: persisted.chain_job_status,
     }))
 }
 
 async fn get_match_status(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(match_id): Path<String>,
 ) -> Result<Json<MatchStatusResponse>, AppError> {
-    // TODO: join matches + chain_jobs and return current record for Unity polling.
+    let match_id_i64 = parse_match_id(&match_id)?;
+    let row = matches_db::get_match_status_record(&state.pool, match_id_i64)
+        .await?
+        .ok_or_else(|| AppError::NotFound("match".into()))?;
+
+    let entry_u64 = u64::try_from(row.entry_lamports)
+        .map_err(|_| AppError::Internal("entry_lamports in DB is negative".into()))?;
+    let pot_u64 = entry_u64
+        .checked_mul(2)
+        .ok_or_else(|| AppError::Internal("pot calculation overflow".into()))?;
+
     Ok(Json(MatchStatusResponse {
-        match_id,
-        join_code: "TODO".into(),
-        program_id: "3abFWCLDDyA2jHfnGLQUTX6W9jddXSMHt9jtyc6Xjfjc".into(),
-        authority_pubkey: "8m2D5QJjQbGEMfFKcjGmdf4xmwWrjZGuoiASpXWM6yJG".into(),
-        game_pda: "TODO_GAME_PDA".into(),
-        vault_pda: "TODO_VAULT_PDA".into(),
-        player1_pubkey: "TODO_PLAYER1".into(),
-        player2_pubkey: None,
-        entry_lamports: "0".into(),
-        pot_lamports: "0".into(),
-        match_status: MatchStatus::WaitingCreateTx,
-        chain_job_type: None,
-        chain_job_status: None,
-        winner_pubkey: None,
-        finalization_reason_code: None,
-        create_tx_sig: None,
-        join_tx_sig: None,
-        final_tx_sig: None,
-        join_expires_at: None,
-        settle_expires_at: None,
-        last_error: None,
-        updated_at: Utc::now(),
+        match_id: row.match_id.to_string(),
+        join_code: row.join_code,
+        program_id: row.program_id,
+        authority_pubkey: row.authority_pubkey,
+        game_pda: row.game_pda,
+        vault_pda: row.vault_pda,
+        player1_pubkey: row.player1_pubkey,
+        player2_pubkey: row.player2_pubkey,
+        entry_lamports: entry_u64.to_string(),
+        pot_lamports: pot_u64.to_string(),
+        match_status: row.match_status,
+        chain_job_type: row.chain_job_type,
+        chain_job_status: row.chain_job_status,
+        winner_pubkey: row.winner_pubkey,
+        finalization_reason_code: row.finalization_reason_code,
+        create_tx_sig: row.create_tx_sig,
+        join_tx_sig: row.join_tx_sig,
+        final_tx_sig: row.final_tx_sig,
+        join_expires_at: row.join_expires_at,
+        settle_expires_at: row.settle_expires_at,
+        last_error: row.last_error,
+        updated_at: row.updated_at,
     }))
 }
 
@@ -223,4 +473,15 @@ fn validate_internal_headers_stub(state: &AppState) -> Result<(), AppError> {
     }
     // TODO: verify HMAC headers (timestamp + nonce + signature) on internal/admin routes.
     Ok(())
+}
+
+fn parse_match_id(raw: &str) -> Result<i64, AppError> {
+    let value = raw
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| AppError::BadRequest("match_id must be an integer".into()))?;
+    if value <= 0 {
+        return Err(AppError::BadRequest("match_id must be positive".into()));
+    }
+    Ok(value)
 }
