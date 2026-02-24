@@ -14,6 +14,14 @@ pub async fn fetch_and_decode_game_account(
     game_pda: &str,
 ) -> Result<DecodedGameAccount> {
     let client = RpcClient::new(rpc_url.to_string());
+    fetch_and_decode_game_account_with_client(&client, program_id, game_pda).await
+}
+
+pub async fn fetch_and_decode_game_account_with_client(
+    client: &RpcClient,
+    program_id: &str,
+    game_pda: &str,
+) -> Result<DecodedGameAccount> {
     let expected_program_id = Pubkey::from_str(program_id).context("invalid PROGRAM_ID")?;
     let game_pubkey = Pubkey::from_str(game_pda).context("invalid game_pda")?;
 
