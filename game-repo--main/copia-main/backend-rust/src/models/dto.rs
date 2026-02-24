@@ -118,4 +118,3 @@ pub struct RetryFinalizationResponse {
     pub match_status: MatchStatus,
     pub chain_job_status: ChainJobStatus,
 }
-

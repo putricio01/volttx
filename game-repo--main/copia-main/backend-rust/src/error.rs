@@ -49,4 +49,3 @@ impl From<anyhow::Error> for AppError {
         Self::Internal(err.to_string())
     }
 }
-

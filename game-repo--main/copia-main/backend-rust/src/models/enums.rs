@@ -38,4 +38,3 @@ pub enum ResultOutcome {
     Winner,
     Broken,
 }
-

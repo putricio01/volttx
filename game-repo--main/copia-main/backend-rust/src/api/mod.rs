@@ -10,4 +10,3 @@ pub fn router() -> Router<AppState> {
         .nest("/matches", matches::router())
         .nest("/admin", admin::router())
 }
-

@@ -12,4 +12,3 @@ pub fn spawn(state: AppState) {
         }
     });
 }
-

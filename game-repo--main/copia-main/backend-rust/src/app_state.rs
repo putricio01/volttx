@@ -13,4 +13,3 @@ impl AppState {
         Self { config, pool }
     }
 }
-

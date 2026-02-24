@@ -7,4 +7,3 @@ pub fn spawn_workers(state: AppState) {
     finalizer::spawn(state.clone());
     timeout_watcher::spawn(state);
 }
-

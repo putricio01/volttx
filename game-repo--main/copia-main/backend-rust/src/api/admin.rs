@@ -14,7 +14,10 @@ use crate::{
 };
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/matches/:match_id/retry-finalization", post(retry_finalization))
+    Router::new().route(
+        "/matches/:match_id/retry-finalization",
+        post(retry_finalization),
+    )
 }
 
 async fn retry_finalization(
@@ -36,4 +39,3 @@ async fn retry_finalization(
         chain_job_status: ChainJobStatus::Pending,
     }))
 }
-

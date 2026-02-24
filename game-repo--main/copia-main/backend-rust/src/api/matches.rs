@@ -7,15 +7,17 @@ use chrono::Utc;
 
 use crate::{
     app_state::AppState,
+    db::matches as matches_db,
     error::AppError,
     models::{
         dto::{
             CreateConfirmRequest, CreateConfirmResponse, CreateMatchRequest, CreateMatchResponse,
-            JoinConfirmRequest, JoinConfirmResponse, MatchLookupByCodeResponse, MatchStatusResponse,
-            ResultRequest, ResultResponse,
+            JoinConfirmRequest, JoinConfirmResponse, MatchLookupByCodeResponse,
+            MatchStatusResponse, ResultRequest, ResultResponse,
         },
         enums::{ChainJobStatus, ChainJobType, MatchStatus, ResultOutcome},
     },
+    solana::pda::derive_match_pdas,
 };
 
 pub fn router() -> Router<AppState> {
@@ -32,21 +34,57 @@ async fn create_match(
     State(state): State<AppState>,
     Json(payload): Json<CreateMatchRequest>,
 ) -> Result<Json<CreateMatchResponse>, AppError> {
-    let _ = state.pool.clone();
-
-    if payload.entry_lamports == "0" {
-        return Err(AppError::BadRequest("entry_lamports must be > 0".into()));
+    let player1_pubkey = payload.player1_pubkey.trim();
+    if player1_pubkey.is_empty() {
+        return Err(AppError::BadRequest("player1_pubkey is required".into()));
     }
 
-    // TODO: implement DB insert + join code generation + PDA derivation.
+    let entry_lamports_u64 = payload.entry_lamports.parse::<u64>().map_err(|_| {
+        AppError::BadRequest("entry_lamports must be a positive integer string".into())
+    })?;
+    if entry_lamports_u64 == 0 {
+        return Err(AppError::BadRequest("entry_lamports must be > 0".into()));
+    }
+    if entry_lamports_u64 > i64::MAX as u64 {
+        return Err(AppError::BadRequest(
+            "entry_lamports is too large for backend storage".into(),
+        ));
+    }
+    let entry_lamports_i64 = entry_lamports_u64 as i64;
+
+    let match_id = matches_db::reserve_next_match_id(&state.pool).await?;
+    let join_code = matches_db::join_code_from_match_id(match_id)?;
+    let pdas = derive_match_pdas(
+        &state.config.program_id,
+        &state.config.authority_pubkey,
+        player1_pubkey,
+        match_id,
+    )
+    .map_err(|e| AppError::BadRequest(format!("invalid create-match inputs: {e}")))?;
+
+    let created = matches_db::insert_create_match_record(
+        &state.pool,
+        match_id,
+        &join_code,
+        &matches_db::CreateMatchRecordParams {
+            program_id: &state.config.program_id,
+            authority_pubkey: &state.config.authority_pubkey,
+            player1_pubkey,
+            entry_lamports: entry_lamports_i64,
+            game_pda: &pdas.game_pda,
+            vault_pda: &pdas.vault_pda,
+        },
+    )
+    .await?;
+
     Ok(Json(CreateMatchResponse {
-        match_id: "0".into(),
-        join_code: "TODO".into(),
+        match_id: created.match_id.to_string(),
+        join_code: created.join_code,
         program_id: state.config.program_id.clone(),
         authority_pubkey: state.config.authority_pubkey.clone(),
-        game_pda: "TODO_GAME_PDA".into(),
-        vault_pda: "TODO_VAULT_PDA".into(),
-        entry_lamports: payload.entry_lamports,
+        game_pda: pdas.game_pda,
+        vault_pda: pdas.vault_pda,
+        entry_lamports: entry_lamports_u64.to_string(),
         join_timeout_seconds: state.config.join_timeout_seconds,
         settle_timeout_seconds: state.config.settle_timeout_seconds,
         match_status: MatchStatus::WaitingCreateTx,
@@ -186,4 +224,3 @@ fn validate_internal_headers_stub(state: &AppState) -> Result<(), AppError> {
     // TODO: verify HMAC headers (timestamp + nonce + signature) on internal/admin routes.
     Ok(())
 }
-
