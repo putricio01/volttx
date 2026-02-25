@@ -32,6 +32,18 @@ pub struct PersistResultAndEnqueueResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct RetryFinalizationResult {
+    pub match_status: MatchStatus,
+    pub chain_job_status: ChainJobStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnqueuedTimeoutRefund {
+    pub match_id: i64,
+    pub chain_job_status: ChainJobStatus,
+}
+
+#[derive(Debug, Clone)]
 pub struct ClaimedFinalizerJob {
     pub chain_job_id: i64,
     pub match_id: i64,
@@ -355,6 +367,249 @@ pub async fn clear_job_lock(
     .await
     .map_err(|e| AppError::Internal(format!("failed to clear chain job lock: {e}")))?;
     Ok(())
+}
+
+pub async fn retry_finalization_job(
+    pool: &PgPool,
+    match_id: i64,
+) -> Result<RetryFinalizationResult, AppError> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| AppError::Internal(format!("failed to begin admin retry transaction: {e}")))?;
+
+    let match_row = sqlx::query(
+        r#"
+        select match_status
+        from matches
+        where match_id = $1
+        for update
+        "#,
+    )
+    .bind(match_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| AppError::Internal(format!("failed to load match for retry: {e}")))?;
+
+    let match_row = match_row.ok_or_else(|| AppError::NotFound("match".into()))?;
+    let current_match_status =
+        parse_match_status(match_row.get::<String, _>("match_status").as_str())?;
+
+    if matches!(
+        current_match_status,
+        MatchStatus::Settled | MatchStatus::Refunded
+    ) {
+        return Err(AppError::Conflict(
+            "cannot retry finalization for a finalized match".into(),
+        ));
+    }
+
+    let job_row = sqlx::query(
+        r#"
+        update chain_jobs
+        set
+          status = 'pending',
+          next_attempt_at = now(),
+          last_error = null,
+          lock_token = null,
+          locked_at = null,
+          updated_at = now()
+        where match_id = $1
+          and status <> 'confirmed'
+        returning status
+        "#,
+    )
+    .bind(match_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| AppError::Internal(format!("failed to reset chain job for retry: {e}")))?;
+
+    let job_row = match job_row {
+        Some(row) => row,
+        None => {
+            let confirmed = sqlx::query(
+                r#"
+                select status
+                from chain_jobs
+                where match_id = $1
+                "#,
+            )
+            .bind(match_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                AppError::Internal(format!("failed to inspect chain job after retry miss: {e}"))
+            })?;
+
+            return match confirmed {
+                Some(row) => {
+                    let status = parse_chain_job_status(row.get::<String, _>("status").as_str())?;
+                    if status == ChainJobStatus::Confirmed {
+                        Err(AppError::Conflict(
+                            "chain job is already confirmed; retry is not allowed".into(),
+                        ))
+                    } else {
+                        Err(AppError::Conflict(
+                            "unable to reset chain job for retry due to concurrent update".into(),
+                        ))
+                    }
+                }
+                None => Err(AppError::NotFound("finalization job".into())),
+            };
+        }
+    };
+
+    let match_row = sqlx::query(
+        r#"
+        update matches
+        set
+          match_status = case
+            when match_status in ('result_pending_finalize', 'finalizing') then 'finalizing'
+            else match_status
+          end,
+          last_error = null,
+          updated_at = now()
+        where match_id = $1
+        returning match_status
+        "#,
+    )
+    .bind(match_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| AppError::Internal(format!("failed to update match during retry: {e}")))?;
+
+    tx.commit().await.map_err(|e| {
+        AppError::Internal(format!("failed to commit admin retry transaction: {e}"))
+    })?;
+
+    Ok(RetryFinalizationResult {
+        match_status: parse_match_status(match_row.get::<String, _>("match_status").as_str())?,
+        chain_job_status: parse_chain_job_status(job_row.get::<String, _>("status").as_str())?,
+    })
+}
+
+pub async fn enqueue_next_expired_join_timeout_force_refund(
+    pool: &PgPool,
+) -> Result<Option<EnqueuedTimeoutRefund>, AppError> {
+    let mut tx = pool.begin().await.map_err(|e| {
+        AppError::Internal(format!(
+            "failed to begin join-timeout enqueue transaction: {e}"
+        ))
+    })?;
+
+    let candidate = sqlx::query(
+        r#"
+        select m.match_id
+        from matches m
+        left join chain_jobs cj on cj.match_id = m.match_id
+        where m.match_status = 'created_on_chain'
+          and m.player2_pubkey is null
+          and m.join_expires_at is not null
+          and m.join_expires_at <= now()
+          and cj.match_id is null
+        order by m.join_expires_at asc, m.match_id asc
+        for update of m skip locked
+        limit 1
+        "#,
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| AppError::Internal(format!("failed to select expired join-timeout match: {e}")))?;
+
+    let Some(candidate) = candidate else {
+        tx.commit().await.map_err(|e| {
+            AppError::Internal(format!(
+                "failed to commit empty join-timeout enqueue transaction: {e}"
+            ))
+        })?;
+        return Ok(None);
+    };
+
+    let match_id = candidate.get::<i64, _>("match_id");
+    let idempotency_key = format!("auto-join-timeout-{match_id}");
+    let reason_detail = "timeout_watcher";
+    let now = Utc::now();
+
+    let updated_match = sqlx::query(
+        r#"
+        update matches
+        set
+          match_status = 'result_pending_finalize',
+          finalization_reason_code = coalesce(finalization_reason_code, 'join_timeout'),
+          finalization_reason_detail = coalesce(finalization_reason_detail, $2),
+          winner_pubkey = null,
+          result_idempotency_key = coalesce(result_idempotency_key, $3),
+          result_reported_at = coalesce(result_reported_at, $4),
+          last_error = null,
+          updated_at = $4
+        where match_id = $1
+          and match_status = 'created_on_chain'
+          and player2_pubkey is null
+        returning match_id
+        "#,
+    )
+    .bind(match_id)
+    .bind(reason_detail)
+    .bind(&idempotency_key)
+    .bind(now)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| {
+        AppError::Internal(format!(
+            "failed to mark match as timeout-refund pending: {e}"
+        ))
+    })?;
+
+    let Some(_updated_match) = updated_match else {
+        tx.commit().await.map_err(|e| {
+            AppError::Internal(format!(
+                "failed to commit join-timeout enqueue transaction after skipped update: {e}"
+            ))
+        })?;
+        return Ok(None);
+    };
+
+    let job_row = sqlx::query(
+        r#"
+        insert into chain_jobs (
+          match_id,
+          job_type,
+          status,
+          winner_pubkey,
+          next_attempt_at
+        )
+        values ($1, 'force_refund', 'pending', null, now())
+        on conflict (match_id) do update
+          set updated_at = now()
+        where chain_jobs.job_type = 'force_refund'
+        returning status
+        "#,
+    )
+    .bind(match_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| {
+        AppError::Internal(format!(
+            "failed to enqueue join-timeout force_refund job: {e}"
+        ))
+    })?;
+
+    let job_row = job_row.ok_or_else(|| {
+        AppError::Conflict(
+            "existing chain job conflicts with join-timeout force_refund enqueue".into(),
+        )
+    })?;
+
+    tx.commit().await.map_err(|e| {
+        AppError::Internal(format!(
+            "failed to commit join-timeout enqueue transaction: {e}"
+        ))
+    })?;
+
+    Ok(Some(EnqueuedTimeoutRefund {
+        match_id,
+        chain_job_status: parse_chain_job_status(job_row.get::<String, _>("status").as_str())?,
+    }))
 }
 
 async fn update_match_result(

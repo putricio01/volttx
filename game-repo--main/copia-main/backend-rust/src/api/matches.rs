@@ -1,5 +1,7 @@
 use axum::{
+    body::Bytes,
     extract::{Path, State},
+    http::HeaderMap,
     routing::{get, post},
     Json, Router,
 };
@@ -334,9 +336,12 @@ async fn confirm_join_tx(
 async fn submit_result(
     State(state): State<AppState>,
     Path(match_id): Path<String>,
-    Json(payload): Json<ResultRequest>,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> Result<Json<ResultResponse>, AppError> {
-    validate_internal_headers_stub(&state)?;
+    crate::api::internal_auth::verify_internal_hmac(&state, &headers, body.as_ref()).await?;
+    let payload: ResultRequest = serde_json::from_slice(body.as_ref())
+        .map_err(|e| AppError::BadRequest(format!("invalid JSON body: {e}")))?;
 
     let match_id_i64 = parse_match_id(&match_id)?;
     let idempotency_key = payload.idempotency_key.trim();
@@ -466,15 +471,6 @@ async fn get_match_status(
         updated_at: row.updated_at,
     }))
 }
-
-fn validate_internal_headers_stub(state: &AppState) -> Result<(), AppError> {
-    if state.config.internal_hmac_secret.is_empty() {
-        return Err(AppError::Unauthorized);
-    }
-    // TODO: verify HMAC headers (timestamp + nonce + signature) on internal/admin routes.
-    Ok(())
-}
-
 fn parse_match_id(raw: &str) -> Result<i64, AppError> {
     let value = raw
         .trim()

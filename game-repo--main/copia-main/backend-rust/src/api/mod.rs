@@ -1,4 +1,5 @@
 pub mod admin;
+mod internal_auth;
 pub mod matches;
 
 use axum::Router;
