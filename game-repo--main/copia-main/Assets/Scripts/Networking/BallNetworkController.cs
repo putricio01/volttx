@@ -11,7 +11,7 @@ using Unity.Netcode;
 [DefaultExecutionOrder(100)]
 public class BallNetworkController : NetworkBehaviour
 {
-    [SerializeField] int stateSendInterval = 6; // Send at 10Hz if physics is 60Hz
+    [SerializeField] int stateSendInterval = 1; // Send every tick = 60Hz
 
     Rigidbody _rb;
     int _ticksSinceLastSend = 0;
@@ -24,6 +24,13 @@ public class BallNetworkController : NetworkBehaviour
     float _interpTime = 0f;
     float _interpDuration = 0.066f; // ~2 ticks at 30Hz
     bool _hasInterpTarget = false;
+
+    // Extrapolation
+    float _maxExtrapolationTime = 0.1f; // cap at 100ms
+    bool _isExtrapolating = false;
+
+    // World-space gravity for extrapolation (BallPhysics uses -650 in internal units / 100 scale)
+    static readonly Vector3 BallGravity = new Vector3(0f, -6.5f, 0f);
 
     int GetSyncedTick()
     {
@@ -84,15 +91,66 @@ public class BallNetworkController : NetworkBehaviour
     {
         if (IsServer) return;
 
-        // Interpolate between buffered states for smooth rendering
-        if (_hasInterpTarget)
-        {
-            _interpTime += Time.deltaTime;
-            float t = Mathf.Clamp01(_interpTime / _interpDuration);
+        if (!_hasInterpTarget) return;
 
-            transform.position = Vector3.Lerp(_interpFrom.Position, _interpTo.Position, t);
+        _interpTime += Time.deltaTime;
+        float t = _interpTime / _interpDuration;
+
+        if (t <= 1.0f)
+        {
+            // Normal interpolation — cubic Hermite using velocity as tangents
+            _isExtrapolating = false;
+            t = Mathf.Clamp01(t);
+
+            Vector3 p0 = _interpFrom.Position;
+            Vector3 p1 = _interpTo.Position;
+            Vector3 m0 = _interpFrom.Velocity * _interpDuration;
+            Vector3 m1 = _interpTo.Velocity * _interpDuration;
+
+            transform.position = HermitePosition(t, p0, p1, m0, m1);
             transform.rotation = Quaternion.Slerp(_interpFrom.Rotation, _interpTo.Rotation, t);
         }
+        else
+        {
+            // Extrapolation fallback — no new state arrived yet
+            float extraTime = _interpTime - _interpDuration;
+
+            if (extraTime <= _maxExtrapolationTime)
+            {
+                _isExtrapolating = true;
+
+                // Extrapolate with velocity + gravity for ballistic arc
+                transform.position = _interpTo.Position
+                    + _interpTo.Velocity * extraTime
+                    + 0.5f * BallGravity * extraTime * extraTime;
+
+                // Rotation extrapolation using angular velocity
+                Vector3 angVel = _interpTo.AngularVelocity;
+                if (angVel.sqrMagnitude > 0.001f)
+                {
+                    float angSpeed = angVel.magnitude;
+                    Quaternion extraRot = Quaternion.AngleAxis(
+                        angSpeed * Mathf.Rad2Deg * extraTime,
+                        angVel.normalized
+                    );
+                    transform.rotation = extraRot * _interpTo.Rotation;
+                }
+            }
+            // else: cap reached, hold position
+        }
+    }
+
+    static Vector3 HermitePosition(float t, Vector3 p0, Vector3 p1, Vector3 m0, Vector3 m1)
+    {
+        float t2 = t * t;
+        float t3 = t2 * t;
+
+        float h00 = 2f * t3 - 3f * t2 + 1f;
+        float h10 = t3 - 2f * t2 + t;
+        float h01 = -2f * t3 + 3f * t2;
+        float h11 = t3 - t2;
+
+        return h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
     }
 
     [ClientRpc]
@@ -104,6 +162,7 @@ public class BallNetworkController : NetworkBehaviour
         _interpFrom = _interpTo;
         _interpTo = state;
         _interpTime = 0f;
+        _isExtrapolating = false;
         _hasInterpTarget = true;
 
         // Estimate interpolation duration from tick delta

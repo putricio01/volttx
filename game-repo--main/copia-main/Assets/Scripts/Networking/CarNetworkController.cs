@@ -23,13 +23,13 @@ public class CarNetworkController : NetworkBehaviour
 
     // Reconciliation thresholds — generous to avoid constant micro-corrections
     [Header("Reconciliation Settings")]
-    [SerializeField] float positionErrorThreshold = 0.5f;   // only correct if >0.5m off
-    [SerializeField] float rotationErrorThreshold = 5f;      // only correct if >5 degrees off
+    [SerializeField] float positionErrorThreshold = 0.15f;  // catch small drift early
+    [SerializeField] float rotationErrorThreshold = 2f;     // catch rotational drift earlier
     [SerializeField] float hardSnapThreshold = 3f;           // hard snap if >3m off (respawn etc)
-    [SerializeField] float correctionBlend = 0.7f;           // 0-1: how much of the correction to apply (1=full snap, 0.7=snappy)
+    [SerializeField] float correctionBlend = 0.85f;          // 0-1: how much of the correction to apply (1=full snap)
 
     // State send rate (server sends every N physics ticks)
-    [SerializeField, Min(1)] int stateSendInterval = 2; // send at 30Hz if physics is 60Hz
+    [SerializeField, Min(1)] int stateSendInterval = 1; // send every tick = 60Hz
 
     // Circular buffers
     InputPayload[] _inputBuffer = new InputPayload[BUFFER_SIZE];
@@ -53,7 +53,7 @@ public class CarNetworkController : NetworkBehaviour
     int _ticksSinceLastSend = 0;
 
     // Client: throttle input sends
-    [SerializeField, Min(1)] int inputSendInterval = 2; // send inputs at 30Hz if physics is 60Hz
+    [SerializeField, Min(1)] int inputSendInterval = 1; // send every tick = 60Hz
     int _ticksSinceLastInputSend = 0;
 
     // Component references
@@ -66,6 +66,10 @@ public class CarNetworkController : NetworkBehaviour
     float _interpTime = 0f;
     float _interpDuration = 0.1f;
     bool _hasInterpTarget = false;
+
+    // Extrapolation
+    float _maxExtrapolationTime = 0.1f; // cap at 100ms
+    bool _isExtrapolating = false;
 
     // Flag to prevent trigger side effects during resimulation
     public static bool IsResimulating { get; private set; }
@@ -214,7 +218,8 @@ public class CarNetworkController : NetworkBehaviour
                 state.Tick,
                 state.Position,
                 state.Rotation,
-                state.Velocity
+                state.Velocity,
+                state.AngularVelocity
             );
         }
     }
@@ -338,14 +343,62 @@ public class CarNetworkController : NetworkBehaviour
         // Only non-owner clients interpolate remote cars
         if (!IsClient || IsOwner || IsServer) return;
 
-        if (_hasInterpTarget)
-        {
-            _interpTime += Time.deltaTime;
-            float t = Mathf.Clamp01(_interpTime / _interpDuration);
+        if (!_hasInterpTarget) return;
 
-            transform.position = Vector3.Lerp(_interpFrom.Position, _interpTo.Position, t);
+        _interpTime += Time.deltaTime;
+        float t = _interpTime / _interpDuration;
+
+        if (t <= 1.0f)
+        {
+            // Normal interpolation — cubic Hermite using velocity as tangents
+            _isExtrapolating = false;
+            t = Mathf.Clamp01(t);
+
+            Vector3 p0 = _interpFrom.Position;
+            Vector3 p1 = _interpTo.Position;
+            Vector3 m0 = _interpFrom.Velocity * _interpDuration;
+            Vector3 m1 = _interpTo.Velocity * _interpDuration;
+
+            transform.position = HermitePosition(t, p0, p1, m0, m1);
             transform.rotation = Quaternion.Slerp(_interpFrom.Rotation, _interpTo.Rotation, t);
         }
+        else
+        {
+            // Extrapolation fallback — no new state arrived yet
+            float extraTime = _interpTime - _interpDuration;
+
+            if (extraTime <= _maxExtrapolationTime)
+            {
+                _isExtrapolating = true;
+                transform.position = _interpTo.Position + _interpTo.Velocity * extraTime;
+
+                // Rotation extrapolation using angular velocity
+                Vector3 angVel = _interpTo.AngularVelocity;
+                if (angVel.sqrMagnitude > 0.001f)
+                {
+                    float angSpeed = angVel.magnitude;
+                    Quaternion extraRot = Quaternion.AngleAxis(
+                        angSpeed * Mathf.Rad2Deg * extraTime,
+                        angVel.normalized
+                    );
+                    transform.rotation = extraRot * _interpTo.Rotation;
+                }
+            }
+            // else: cap reached, hold position
+        }
+    }
+
+    static Vector3 HermitePosition(float t, Vector3 p0, Vector3 p1, Vector3 m0, Vector3 m1)
+    {
+        float t2 = t * t;
+        float t3 = t2 * t;
+
+        float h00 = 2f * t3 - 3f * t2 + 1f;
+        float h10 = t3 - 2f * t2 + t;
+        float h01 = -2f * t3 + 3f * t2;
+        float h11 = t3 - t2;
+
+        return h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
     }
 
     // ========================================================================
@@ -363,7 +416,7 @@ public class CarNetworkController : NetworkBehaviour
     }
 
     [ClientRpc]
-    void BroadcastPositionClientRpc(int tick, Vector3 position, Quaternion rotation, Vector3 velocity)
+    void BroadcastPositionClientRpc(int tick, Vector3 position, Quaternion rotation, Vector3 velocity, Vector3 angularVelocity)
     {
         if (IsOwner || IsServer) return;
 
@@ -373,15 +426,17 @@ public class CarNetworkController : NetworkBehaviour
             Tick = tick,
             Position = position,
             Rotation = rotation,
-            Velocity = velocity
+            Velocity = velocity,
+            AngularVelocity = angularVelocity
         };
         _interpTime = 0f;
+        _isExtrapolating = false;
         _hasInterpTarget = true;
 
         if (_interpFrom.Tick > 0)
         {
             int tickDelta = _interpTo.Tick - _interpFrom.Tick;
-            _interpDuration = Mathf.Max(tickDelta * Time.fixedDeltaTime, 0.033f);
+            _interpDuration = Mathf.Max(tickDelta * Time.fixedDeltaTime, 0.016f);
         }
     }
 
