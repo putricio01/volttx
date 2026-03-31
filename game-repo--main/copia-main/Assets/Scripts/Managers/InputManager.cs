@@ -31,6 +31,10 @@ public class InputManager : MonoBehaviour
     // Joystick values (set from UICanvasControllerInput)
     public Vector2 joystickMoveInput = Vector2.zero;
 
+    // Buffered joystick value sampled at FixedUpdate time for consistent tick capture
+    Vector2 _fixedJoystickInput;
+    bool _loggedJoystickRangeWarning;
+
 #if !UNITY_SERVER
     public Button bust;
     public Button jomp;
@@ -72,6 +76,25 @@ public class InputManager : MonoBehaviour
     }
 #endif
 
+    void FixedUpdate()
+    {
+        if (serverMode) return;
+
+        // Snapshot joystick at physics tick time so CaptureInputPayload is consistent
+        if (useJoystickInput)
+        {
+            _fixedJoystickInput = SanitizeJoystickInput(joystickMoveInput);
+
+            // With WASD snap mode, values are already -1, 0, or +1.
+            // No quantization needed — digital values match exactly on client and server.
+            throttleInput = _fixedJoystickInput.y;
+            steerInput = _fixedJoystickInput.x;
+            yawInput = steerInput;
+            isJumpUp = _latchedJumpUp;
+            isJumpDown = _latchedJumpDown;
+        }
+    }
+
     void Update()
     {
         // Server only gets input via ApplyInputPayload(), never from local keyboard
@@ -80,13 +103,14 @@ public class InputManager : MonoBehaviour
 #if !UNITY_SERVER
         if (useJoystickInput)
         {
-            throttleInput = joystickMoveInput.y;
-            steerInput = joystickMoveInput.x;
-            yawInput = joystickMoveInput.x;
-            // boost and jump are set via UI button callbacks (SetBoost / OnJumpButtonClicked)
+            // Input is now captured in FixedUpdate for tick-sync.
+            // Only update latched jump events here (edge detection).
+            isJumpUp = _latchedJumpUp;
+            isJumpDown = _latchedJumpDown;
         }
         else
         {
+#if ENABLE_LEGACY_INPUT_MANAGER
             throttleInput = GetThrottle();
             steerInput = GetSteerInput();
             isJump = Input.GetMouseButton(1) || Input.GetButton("A");
@@ -103,6 +127,21 @@ public class InputManager : MonoBehaviour
             rollInput = GetRollInput();
             isDrift = Input.GetButton("LB") || Input.GetKey(KeyCode.LeftShift);
             isAirRoll = Input.GetButton("LB") || Input.GetKey(KeyCode.LeftShift);
+#else
+            throttleInput = 0f;
+            steerInput = 0f;
+            yawInput = 0f;
+            pitchInput = 0f;
+            rollInput = 0f;
+            isJump = false;
+            isJumpUp = false;
+            isJumpDown = false;
+            isBoost = false;
+            isDrift = false;
+            isAirRoll = false;
+            _latchedJumpDown = false;
+            _latchedJumpUp = false;
+#endif
         }
 #endif
     }
@@ -128,6 +167,7 @@ public class InputManager : MonoBehaviour
             IsJumpUp = isJumpUp,
             IsJumpDown = isJumpDown
         };
+        payload.ClampAnalogInputs();
 
         // Clear latched one-shot events after they've been captured
         _latchedJumpDown = false;
@@ -142,6 +182,7 @@ public class InputManager : MonoBehaviour
     /// </summary>
     public void ApplyInputPayload(InputPayload payload)
     {
+        payload.ClampAnalogInputs();
         throttleInput = payload.ThrottleInput;
         steerInput = payload.SteerInput;
         yawInput = payload.YawInput;
@@ -162,34 +203,57 @@ public class InputManager : MonoBehaviour
 
     public void OnJumpButtonClicked(bool state)
     {
-        isJump = state;
-        isJumpUp = state;
-        isJumpDown = state;
+        // Mirror keyboard behavior: press/release are one-shot edges consumed in FixedUpdate.
+        if (state)
+        {
+            isJump = true;
+            _latchedJumpDown = true;
+        }
+        else
+        {
+            isJump = false;
+            _latchedJumpUp = true;
+        }
+
+        isJumpUp = _latchedJumpUp;
+        isJumpDown = _latchedJumpDown;
     }
 
     private static float GetRollInput()
     {
+#if ENABLE_LEGACY_INPUT_MANAGER
         var inputRoll = 0;
         if (Input.GetKey(KeyCode.E) || Input.GetButton("B"))
             inputRoll = -1;
         else if (Input.GetKey(KeyCode.Q) || Input.GetButton("Y"))
             inputRoll = 1;
         return inputRoll;
+#else
+        return 0f;
+#endif
     }
 
     static float GetThrottle()
     {
+#if ENABLE_LEGACY_INPUT_MANAGER
         float throttle = 0;
         if (Input.GetAxis("Vertical") > 0 || Input.GetAxis("RT") > 0)
             throttle = Mathf.Max(Input.GetAxis("Vertical"), Input.GetAxis("RT"));
         else if (Input.GetAxis("Vertical") < 0 || Input.GetAxis("LT") < 0)
             throttle = Mathf.Min(Input.GetAxis("Vertical"), Input.GetAxis("LT"));
         return throttle;
+#else
+        return 0f;
+#endif
     }
 
     static float GetSteerInput()
     {
+#if ENABLE_LEGACY_INPUT_MANAGER
         return Input.GetAxis("Horizontal");
+#else
+        return 0f;
+#endif
     }
 
     public string axisName = "Horizontal";
@@ -198,9 +262,38 @@ public class InputManager : MonoBehaviour
     float _currentHorizontalInput = 0;
     public float GetValue()
     {
+#if ENABLE_LEGACY_INPUT_MANAGER
         var target = Mathf.MoveTowards(_currentHorizontalInput, Input.GetAxis(axisName), Time.fixedDeltaTime / 25);
         _currentHorizontalInput = sensitivityCurve.Evaluate(Mathf.Abs(target));
         var ret = _currentHorizontalInput * Mathf.Sign(Input.GetAxis(axisName));
         return ret;
+#else
+        return 0f;
+#endif
+    }
+
+    /// <summary>
+    /// Quantize a float to the nearest step.
+    /// Reduces unique analog values so client/server predictions match more often.
+    /// </summary>
+    static float Quantize(float value, float step)
+    {
+        return Mathf.Round(value / step) * step;
+    }
+
+    Vector2 SanitizeJoystickInput(Vector2 rawInput)
+    {
+        if (!float.IsFinite(rawInput.x) || !float.IsFinite(rawInput.y))
+            return Vector2.zero;
+
+        Vector2 clampedInput = Vector2.ClampMagnitude(rawInput, 1f);
+
+        if (!_loggedJoystickRangeWarning && (Mathf.Abs(rawInput.x) > 1.01f || Mathf.Abs(rawInput.y) > 1.01f || rawInput.sqrMagnitude > 1.05f))
+        {
+            _loggedJoystickRangeWarning = true;
+            Debug.LogWarning($"[InputManager] Joystick input out of range on '{name}'. Raw={rawInput} Clamped={clampedInput}. This usually means the mobile move control is scaled for UI but not normalized for gameplay.");
+        }
+
+        return clampedInput;
     }
 }

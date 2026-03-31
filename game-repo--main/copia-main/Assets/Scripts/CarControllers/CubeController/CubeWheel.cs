@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-public class CubeWheel : MonoBehaviour
+public class CubeWheel : MonoBehaviour, ITickSimulatable
 {
   //  public float steerAngle;
   //  public float Fx;
@@ -43,7 +43,7 @@ public class CubeWheel : MonoBehaviour
             transform.localRotation = Quaternion.Euler(Vector3.up * steerAngle);
         
         // Update mesh rotations of the wheel
-        if (wheelMesh)
+        if (wheelMesh && !CarNetworkController.IsResimulating)
         {
             //wheelMesh.transform.position = transform.position;
             wheelMesh.transform.localRotation = transform.localRotation;
@@ -55,6 +55,13 @@ public class CubeWheel : MonoBehaviour
     }
 
     private void FixedUpdate()
+    {
+        SimulateNetworkTick();
+    }
+
+    public int TickOrder => TickSimulationOrder.Wheels;
+
+    public void SimulateNetworkTick()
     {
         if (_rb == null || _rb.isKinematic) return;
 

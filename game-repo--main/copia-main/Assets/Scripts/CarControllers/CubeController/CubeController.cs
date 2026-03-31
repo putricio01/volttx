@@ -1,4 +1,3 @@
-using System.Linq;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -7,6 +6,7 @@ using Unity.Netcode;
 
 [RequireComponent(typeof(Rigidbody))]
 public class CubeController : NetworkBehaviour
+    , ITickSimulatable
 {
     PlayerRespawner playerRespawner;
 
@@ -30,6 +30,8 @@ public class CubeController : NetworkBehaviour
     Rigidbody _rb;
     GUIStyle _style;
     CubeSphereCollider[] _sphereColliders;
+    CubeJumping _jumping;
+    CubeGroundControl _groundControl;
 
     public enum CarStates
     {
@@ -44,13 +46,21 @@ public class CubeController : NetworkBehaviour
     void Start()
     {
         playerRespawner = FindObjectOfType<PlayerRespawner>();
-        playerRespawner.Respawns.Insert((int)NetworkManager.LocalClientId, gameObject);
+        if (playerRespawner != null && NetworkManager.Singleton != null)
+        {
+            int clientIndex = (int)NetworkManager.LocalClientId;
+            while (playerRespawner.Respawns.Count <= clientIndex)
+                playerRespawner.Respawns.Add(null);
+            playerRespawner.Respawns[clientIndex] = gameObject;
+        }
 
         _rb = GetComponent<Rigidbody>();
         _rb.centerOfMass = cogLow.localPosition;
         _rb.maxAngularVelocity = 5.5f;
 
         _sphereColliders = GetComponentsInChildren<CubeSphereCollider>();
+        _jumping = GetComponent<CubeJumping>();
+        _groundControl = GetComponent<CubeGroundControl>();
 
         // GUI stuff
         _style = new GUIStyle();
@@ -60,6 +70,13 @@ public class CubeController : NetworkBehaviour
     }
 
     void FixedUpdate()
+    {
+        SimulateNetworkTick();
+    }
+
+    public int TickOrder => TickSimulationOrder.CarState;
+
+    public void SimulateNetworkTick()
     {
         SetCarState();
         UpdateCarVariables();
@@ -76,8 +93,12 @@ public class CubeController : NetworkBehaviour
 
     void SetCarState()
     {
-        int temp = _sphereColliders.Count(c => c.isTouchingSurface);
-        numWheelsSurface = temp;
+        int count = 0;
+        for (int i = 0; i < _sphereColliders.Length; i++)
+        {
+            if (_sphereColliders[i].isTouchingSurface) count++;
+        }
+        numWheelsSurface = count;
 
         isAllWheelsSurface = numWheelsSurface >= 3;
 
@@ -108,9 +129,6 @@ public class CubeController : NetworkBehaviour
     /// </summary>
     public StatePayload CaptureStatePayload(int tick)
     {
-        var jumping = GetComponent<CubeJumping>();
-        var groundControl = GetComponent<CubeGroundControl>();
-
         return new StatePayload
         {
             Tick = tick,
@@ -126,11 +144,11 @@ public class CubeController : NetworkBehaviour
             ForwardSpeedSign = forwardSpeedSign,
             ForwardSpeedAbs = forwardSpeedAbs,
             CarState = (int)carState,
-            IsJumping = jumping != null ? jumping.isJumping : false,
-            IsCanFirstJump = jumping != null ? jumping.isCanFirstJump : false,
-            IsCanKeepJumping = jumping != null ? jumping.isCanKeepJumping : false,
-            JumpTimer = jumping != null ? jumping.jumpTimer : 0f,
-            CurrentWheelSideFriction = groundControl != null ? groundControl.currentWheelSideFriction : 8f
+            IsJumping = _jumping != null ? _jumping.isJumping : false,
+            IsCanFirstJump = _jumping != null ? _jumping.isCanFirstJump : false,
+            IsCanKeepJumping = _jumping != null ? _jumping.isCanKeepJumping : false,
+            JumpTimer = _jumping != null ? _jumping.jumpTimer : 0f,
+            CurrentWheelSideFriction = _groundControl != null ? _groundControl.currentWheelSideFriction : 8f
         };
     }
 
@@ -153,19 +171,17 @@ public class CubeController : NetworkBehaviour
         forwardSpeedAbs = state.ForwardSpeedAbs;
         carState = (CarStates)state.CarState;
 
-        var jumping = GetComponent<CubeJumping>();
-        if (jumping != null)
+        if (_jumping != null)
         {
-            jumping.isJumping = state.IsJumping;
-            jumping.isCanFirstJump = state.IsCanFirstJump;
-            jumping.isCanKeepJumping = state.IsCanKeepJumping;
-            jumping.jumpTimer = state.JumpTimer;
+            _jumping.isJumping = state.IsJumping;
+            _jumping.isCanFirstJump = state.IsCanFirstJump;
+            _jumping.isCanKeepJumping = state.IsCanKeepJumping;
+            _jumping.jumpTimer = state.JumpTimer;
         }
 
-        var groundControl = GetComponent<CubeGroundControl>();
-        if (groundControl != null)
+        if (_groundControl != null)
         {
-            groundControl.currentWheelSideFriction = state.CurrentWheelSideFriction;
+            _groundControl.currentWheelSideFriction = state.CurrentWheelSideFriction;
         }
     }
 
@@ -180,7 +196,7 @@ public class CubeController : NetworkBehaviour
     void OnGUI()
     {
         // Only show debug HUD on clients (server has no display)
-        if (!IsOwner || _style == null) return;
+        if (!IsOwner || _style == null || Application.isMobilePlatform) return;
 
         GUI.Label(new Rect(10.0f, 40.0f, 150, 130), $"{forwardSpeed:F2} m/s {forwardSpeed * 100:F0} uu/s", _style);
     }

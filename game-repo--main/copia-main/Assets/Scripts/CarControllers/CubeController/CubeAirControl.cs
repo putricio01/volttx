@@ -5,6 +5,7 @@ using Unity.Netcode;
 
 [RequireComponent(typeof(CubeController))]
 public class CubeAirControl : NetworkBehaviour
+    , ITickSimulatable
 {
     public bool isUseDamperTorque = true;
     
@@ -33,6 +34,11 @@ public class CubeAirControl : NetworkBehaviour
 
     void Update()
     {
+        RefreshInputsFromManager();
+    }
+
+    void RefreshInputsFromManager()
+    {
         if (_inputManager == null) return;
         _inputYaw = _inputManager.yawInput;
         _inputPitch = _inputManager.pitchInput;
@@ -47,6 +53,14 @@ public class CubeAirControl : NetworkBehaviour
 
     private void FixedUpdate()
     {
+        SimulateNetworkTick();
+    }
+
+    public int TickOrder => TickSimulationOrder.AirControl;
+
+    public void SimulateNetworkTick()
+    {
+        RefreshInputsFromManager();
         if (_controller.numWheelsSurface >= 3) return;
         
         // roll

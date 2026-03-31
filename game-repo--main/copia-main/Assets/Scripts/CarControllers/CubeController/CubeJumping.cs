@@ -3,6 +3,7 @@ using Unity.Netcode;
 
 [RequireComponent(typeof(CubeController))]
 public class CubeJumping : NetworkBehaviour
+    , ITickSimulatable
 {
     [Header("Forces")]
     [Range(0.25f,4)]
@@ -36,6 +37,13 @@ public class CubeJumping : NetworkBehaviour
     }
 
     private void FixedUpdate()
+    {
+        SimulateNetworkTick();
+    }
+
+    public int TickOrder => TickSimulationOrder.Jumping;
+
+    public void SimulateNetworkTick()
     {
         Jump();
         JumpBackToTheFeet();
@@ -92,7 +100,7 @@ public class CubeJumping : NetworkBehaviour
     {
         if (_controller.carState != CubeController.CarStates.BodyGroundDead) return;
         
-        if (_inputManager.isJumpDown || Input.GetButtonDown("A"))
+        if (_inputManager != null && _inputManager.isJumpDown)
         {
             _rb.AddForce(Vector3.up * upForce, ForceMode.VelocityChange);
             _rb.AddTorque(transform.forward * upTorque, ForceMode.VelocityChange);

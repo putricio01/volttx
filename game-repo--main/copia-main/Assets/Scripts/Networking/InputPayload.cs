@@ -1,4 +1,5 @@
 using Unity.Netcode;
+using UnityEngine;
 
 /// <summary>
 /// Tick-stamped input snapshot sent from client to server each physics tick.
@@ -18,6 +19,23 @@ public struct InputPayload : INetworkSerializable
     public bool IsJump;
     public bool IsJumpUp;
     public bool IsJumpDown;
+
+    static float SanitizeAxis(float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            return 0f;
+
+        return Mathf.Clamp(value, -1f, 1f);
+    }
+
+    public void ClampAnalogInputs()
+    {
+        ThrottleInput = SanitizeAxis(ThrottleInput);
+        SteerInput = SanitizeAxis(SteerInput);
+        YawInput = SanitizeAxis(YawInput);
+        PitchInput = SanitizeAxis(PitchInput);
+        RollInput = SanitizeAxis(RollInput);
+    }
 
     public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
     {

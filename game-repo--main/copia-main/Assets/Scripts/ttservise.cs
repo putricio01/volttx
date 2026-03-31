@@ -14,6 +14,8 @@ using UnityEngine;
 public class ttservise : MonoBehaviour
 {
     public static readonly PublicKey ProgramId = new PublicKey("3abFWCLDDyA2jHfnGLQUTX6W9jddXSMHt9jtyc6Xjfjc");
+    public static readonly PublicKey UpgradeableLoaderProgramId =
+        new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 
     private static readonly byte[] GameSeedBytes = Encoding.UTF8.GetBytes(GameProgramInstructions.GameSeed);
     private static readonly byte[] VaultSeedBytes = Encoding.UTF8.GetBytes(GameProgramInstructions.VaultSeed);
@@ -21,16 +23,19 @@ public class ttservise : MonoBehaviour
     public string LastGameAddress { get; private set; }
     public string LastVaultAddress { get; private set; }
     public string LastSignature { get; private set; }
+    public ulong LastMatchId { get; private set; }
 
     private void Awake()
     {
+        // Web3 singleton may not be ready yet during Awake — that's fine,
+        // it will be available by the time the player connects their wallet.
         if (Web3.Instance == null)
         {
-            Debug.LogError("Web3 instance is not initialized.");
+            Debug.LogWarning("[ttservise] Web3 not yet initialized — will be available after wallet connect.");
         }
     }
 
-    public async Task<bool> CreateGameTransaction(ulong entryAmount)
+    public async Task<bool> CreateGameTransaction(ulong entryAmount, ulong matchId)
     {
         if (entryAmount == 0)
         {
@@ -41,8 +46,18 @@ public class ttservise : MonoBehaviour
         if (!TryGetActiveAccount(out var player1))
             return false;
 
-        var authority = player1.PublicKey;
-        if (!TryDeriveGamePda(player1.PublicKey, authority, out var gamePda))
+        // Use server authority from GameConfig (not player1's own key)
+        var config = GameConfig.Load();
+        if (config == null || string.IsNullOrEmpty(config.authorityPubkey))
+        {
+            Debug.LogError("GameConfig missing or authorityPubkey not set.");
+            return false;
+        }
+
+        if (!TryParsePublicKey(config.authorityPubkey, "authorityPubkey", out var authority))
+            return false;
+
+        if (!TryDeriveGamePda(player1.PublicKey, authority, matchId, out var gamePda))
         {
             Debug.LogError("Failed to derive game PDA.");
             return false;
@@ -54,13 +69,22 @@ public class ttservise : MonoBehaviour
             return false;
         }
 
+        if (!TryDeriveProgramDataPda(ProgramId, out var programDataPda))
+        {
+            Debug.LogError("Failed to derive program_data PDA.");
+            return false;
+        }
+
         LastGameAddress = gamePda.Key;
         LastVaultAddress = vaultPda.Key;
+        LastMatchId = matchId;
 
         var accounts = new CreateGameAccounts
         {
             Player1 = player1.PublicKey,
             Authority = authority,
+            Program = ProgramId,
+            ProgramData = programDataPda,
             Game = gamePda,
             Vault = vaultPda,
             SystemProgram = SystemProgram.ProgramIdKey
@@ -68,7 +92,7 @@ public class ttservise : MonoBehaviour
 
         var builder = new TransactionBuilder()
             .SetFeePayer(player1)
-            .AddInstruction(GameProgramInstructions.CreateGame(accounts, entryAmount, ProgramId));
+            .AddInstruction(GameProgramInstructions.CreateGame(accounts, entryAmount, matchId, ProgramId));
 
         return await SignAndSendAsync(builder, new List<Account> { player1 }, "create_game");
     }
@@ -119,11 +143,19 @@ public class ttservise : MonoBehaviour
             return false;
         }
 
+        if (!TryDeriveProgramDataPda(ProgramId, out var programDataPda))
+        {
+            Debug.LogError("Failed to derive program_data PDA.");
+            return false;
+        }
+
         var accounts = new SettleGameAccounts
         {
             Game = gamePda,
             Vault = vaultPda,
             Winner = winner,
+            Program = ProgramId,
+            ProgramData = programDataPda,
             Authority = authority.PublicKey,
             SystemProgram = SystemProgram.ProgramIdKey
         };
@@ -208,6 +240,7 @@ public class ttservise : MonoBehaviour
     public bool TryDeriveGameAndVaultAddresses(
         string player1Address,
         string authorityAddress,
+        ulong matchId,
         out string gameAddress,
         out string vaultAddress)
     {
@@ -218,7 +251,7 @@ public class ttservise : MonoBehaviour
             return false;
         if (!TryParsePublicKey(authorityAddress, "authorityAddress", out var authority))
             return false;
-        if (!TryDeriveGamePda(player1, authority, out var gamePda))
+        if (!TryDeriveGamePda(player1, authority, matchId, out var gamePda))
             return false;
         if (!TryDeriveVaultPda(gamePda, out var vaultPda))
             return false;
@@ -243,9 +276,27 @@ public class ttservise : MonoBehaviour
 
             var tx = Transaction.Deserialize(builder.Build(signers));
             var sendResult = await Web3.Wallet.SignAndSendTransaction(tx);
-            if (sendResult?.Result == null)
+            if (sendResult == null || !sendResult.WasSuccessful || string.IsNullOrEmpty(sendResult.Result))
             {
-                Debug.LogError($"Transaction failed for {instructionName}.");
+                string reason = sendResult?.Reason;
+                Debug.LogError(
+                    $"Transaction failed for {instructionName}. " +
+                    $"Reason: {(string.IsNullOrWhiteSpace(reason) ? "(no RPC reason)" : reason)}");
+
+                if (instructionName == "create_game")
+                {
+                    try
+                    {
+                        double balanceSol = await Web3.Wallet.GetBalance(Commitment.Confirmed);
+                        Debug.LogError(
+                            $"[create_game] Wallet balance: {balanceSol:F9} SOL. " +
+                            "You need enough for wager + rent-exempt account creation + tx fees.");
+                    }
+                    catch
+                    {
+                        // best-effort diagnostics only
+                    }
+                }
                 return false;
             }
 
@@ -290,10 +341,11 @@ public class ttservise : MonoBehaviour
         }
     }
 
-    private static bool TryDeriveGamePda(PublicKey player1, PublicKey authority, out PublicKey gamePda)
+    private static bool TryDeriveGamePda(PublicKey player1, PublicKey authority, ulong matchId, out PublicKey gamePda)
     {
+        byte[] matchIdBytes = BitConverter.GetBytes(matchId); // Little-endian
         return PublicKey.TryFindProgramAddress(
-            new[] { GameSeedBytes, player1.KeyBytes, authority.KeyBytes },
+            new[] { GameSeedBytes, player1.KeyBytes, authority.KeyBytes, matchIdBytes },
             ProgramId,
             out gamePda,
             out _);
@@ -305,6 +357,15 @@ public class ttservise : MonoBehaviour
             new[] { VaultSeedBytes, gamePda.KeyBytes },
             ProgramId,
             out vaultPda,
+            out _);
+    }
+
+    private static bool TryDeriveProgramDataPda(PublicKey programId, out PublicKey programDataPda)
+    {
+        return PublicKey.TryFindProgramAddress(
+            new[] { programId.KeyBytes },
+            UpgradeableLoaderProgramId,
+            out programDataPda,
             out _);
     }
 }

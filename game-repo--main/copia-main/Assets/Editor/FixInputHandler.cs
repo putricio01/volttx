@@ -2,7 +2,7 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// One-time fix: Sets Active Input Handling to "Both" so legacy Input API works.
+/// One-time fix: Sets Active Input Handling to "Input Manager (Old)" for Android-safe legacy input.
 /// </summary>
 public class FixInputHandler
 {
@@ -20,9 +20,9 @@ public class FixInputHandler
         if (prop != null)
         {
             Debug.Log($"[FixInputHandler] Current activeInputHandler = {prop.intValue}");
-            prop.intValue = 0; // Both
+            prop.intValue = 1; // Input Manager (Old)
             so.ApplyModifiedPropertiesWithoutUndo();
-            Debug.Log("[FixInputHandler] Set activeInputHandler to 0 (Both). RESTART UNITY for it to take effect.");
+            Debug.Log("[FixInputHandler] Set activeInputHandler to 1 (Input Manager (Old)). RESTART UNITY for it to take effect.");
         }
         else
         {

@@ -170,6 +170,11 @@ MonoBehaviour:
   magnitudeMultiplier: 1
   invertXOutputValue: 0
   invertYOutputValue: 0
+  wasdSnapMode: 0
+  snapThreshold: 0.3
+  deadzone: 0.06
+  smoothAnalogOutput: 0
+  smoothSpeed: 15
   joystickOutputEvent:
     m_PersistentCalls:
       m_Calls:

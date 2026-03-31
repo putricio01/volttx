@@ -10,6 +10,8 @@ namespace SolanaGame.Program
     {
         public PublicKey Player1 { get; set; }
         public PublicKey Authority { get; set; }
+        public PublicKey Program { get; set; }
+        public PublicKey ProgramData { get; set; }
         public PublicKey Game { get; set; }
         public PublicKey Vault { get; set; }
         public PublicKey SystemProgram { get; set; }
@@ -28,6 +30,8 @@ namespace SolanaGame.Program
         public PublicKey Game { get; set; }
         public PublicKey Vault { get; set; }
         public PublicKey Winner { get; set; }
+        public PublicKey Program { get; set; }
+        public PublicKey ProgramData { get; set; }
         public PublicKey Authority { get; set; }
         public PublicKey SystemProgram { get; set; }
     }
@@ -51,7 +55,7 @@ namespace SolanaGame.Program
         private const ulong SettleGameDiscriminator = 2114095808068990560UL;
         private const ulong RefundDiscriminator = 3327826147897991170UL;
 
-        public static TransactionInstruction CreateGame(CreateGameAccounts accounts, ulong entryAmount, PublicKey programId)
+        public static TransactionInstruction CreateGame(CreateGameAccounts accounts, ulong entryAmount, ulong matchId, PublicKey programId)
         {
             if (accounts == null) throw new ArgumentNullException(nameof(accounts));
 
@@ -59,16 +63,20 @@ namespace SolanaGame.Program
             {
                 AccountMeta.Writable(accounts.Player1, true),
                 AccountMeta.ReadOnly(accounts.Authority, false),
+                AccountMeta.ReadOnly(accounts.Program, false),
+                AccountMeta.ReadOnly(accounts.ProgramData, false),
                 AccountMeta.Writable(accounts.Game, false),
                 AccountMeta.Writable(accounts.Vault, false),
                 AccountMeta.ReadOnly(accounts.SystemProgram, false)
             };
 
-            byte[] data = new byte[16];
+            byte[] data = new byte[24];
             int offset = 0;
             data.WriteU64(CreateGameDiscriminator, offset);
             offset += 8;
             data.WriteU64(entryAmount, offset);
+            offset += 8;
+            data.WriteU64(matchId, offset);
 
             return new TransactionInstruction
             {
@@ -110,6 +118,8 @@ namespace SolanaGame.Program
                 AccountMeta.Writable(accounts.Game, false),
                 AccountMeta.Writable(accounts.Vault, false),
                 AccountMeta.Writable(accounts.Winner, false),
+                AccountMeta.ReadOnly(accounts.Program, false),
+                AccountMeta.ReadOnly(accounts.ProgramData, false),
                 AccountMeta.ReadOnly(accounts.Authority, true),
                 AccountMeta.ReadOnly(accounts.SystemProgram, false)
             };

@@ -8,6 +8,7 @@ using TMPro;
 public class gol2 : NetworkBehaviour
 {
     private NetworkVariable<int> score = new NetworkVariable<int>();
+    public int CurrentScore => score.Value;
     public Ball ball;
     public PlayerRespawner playerRespawner;
     public TextMeshProUGUI scoreText;

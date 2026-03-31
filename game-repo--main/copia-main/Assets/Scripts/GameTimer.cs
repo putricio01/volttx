@@ -5,7 +5,8 @@ using Unity.Netcode;
 /// <summary>
 /// Server-authoritative game timer. Only the server ticks the timer.
 /// Sends time updates to clients via ClientRpc.
-/// Starts when the second player joins (1v1 game).
+/// Dedicated server starts only after MatchManager validates both players as ready.
+/// Host/editor fallback starts when the second player joins (1v1 game).
 /// </summary>
 public class GameTimer : NetworkBehaviour
 {
@@ -15,6 +16,7 @@ public class GameTimer : NetworkBehaviour
     private NetworkVariable<float> timeRemaining = new NetworkVariable<float>(180f);
 
     private bool timerIsRunning = false;
+    private bool roundStarted = false;
     public Ball ball;
     public PlayerRespawner playerRespawner;
 
@@ -36,22 +38,27 @@ public class GameTimer : NetworkBehaviour
     {
         if (!IsServer) return;
 
-        // Start when the second player joins
-        if (NetworkManager.Singleton.ConnectedClients.Count == 2)
-        {
-            timeRemaining.Value = 180f; // Reset to 3 minutes
-            timerIsRunning = true;
+        if (playerRespawner != null)
             playerRespawner.RespawnPlayersAfterGoal();
-            lol.ResetScoreServerRpc();
-            lol2.ResetScoreServerRpc();
-            Debug.Log("[Server] Both players connected. Match starting!");
-        }
+
+#if UNITY_SERVER || UNITY_EDITOR
+        // Server-authoritative path (dedicated or editor-server):
+        // wait until MatchManager validates metadata and both players are ready.
+        if (NetworkManager.Singleton.ConnectedClients.Count == 2)
+            Debug.Log("[Server] Two clients connected. Waiting for MatchManager InProgress before starting timer.");
+#else
+        // Host/editor fallback: start when second player connects.
+        if (NetworkManager.Singleton.ConnectedClients.Count == 2)
+            StartRound();
+#endif
     }
 
     void Update()
     {
         // Only the server ticks the timer (guard against pre-spawn calls)
         if (!IsSpawned || !IsServer) return;
+
+        TryStartRoundIfReady();
 
         if (timerIsRunning && timeRemaining.Value > 0)
         {
@@ -63,6 +70,33 @@ public class GameTimer : NetworkBehaviour
             timerIsRunning = false;
             EndGame();
         }
+    }
+
+    void TryStartRoundIfReady()
+    {
+        if (timerIsRunning || roundStarted) return;
+
+#if UNITY_SERVER || UNITY_EDITOR
+        if (MatchManager.Instance == null) return;
+        if (MatchManager.Instance.CurrentState != MatchManager.MatchState.InProgress) return;
+#else
+        if (NetworkManager.Singleton == null || NetworkManager.Singleton.ConnectedClients.Count < 2) return;
+#endif
+
+        StartRound();
+    }
+
+    void StartRound()
+    {
+        if (roundStarted) return;
+
+        roundStarted = true;
+        timeRemaining.Value = 180f; // Reset to 3 minutes
+        timerIsRunning = true;
+        if (playerRespawner != null) playerRespawner.RespawnPlayersAfterGoal();
+        if (lol != null) lol.ResetScoreServerRpc();
+        if (lol2 != null) lol2.ResetScoreServerRpc();
+        Debug.Log("[Server] Match round started.");
     }
 
     void UpdateTimerDisplay()
@@ -97,7 +131,11 @@ public class GameTimer : NetworkBehaviour
 
     void EndGame()
     {
-        Debug.Log("[Server] Match ended. Shutting down...");
+        Debug.Log("[Server] Match ended. Finalizing result...");
+
+#if UNITY_SERVER || UNITY_EDITOR
+        FinalizeMatchFromScore();
+#endif
 
         // Notify clients before shutdown
         GameOverClientRpc();
@@ -107,12 +145,55 @@ public class GameTimer : NetworkBehaviour
             Destroy(ball.gameObject);
         }
 
-        // Delay shutdown slightly so the ClientRpc has time to arrive
-        Invoke(nameof(ShutdownServer), 1f);
+        // Delay shutdown so finalization request and GameOver RPC can be sent.
+        Invoke(nameof(ShutdownServer), 2f);
     }
 
     void ShutdownServer()
     {
         NetworkManager.Singleton.Shutdown();
     }
+
+#if UNITY_SERVER || UNITY_EDITOR
+    void FinalizeMatchFromScore()
+    {
+        if (MatchManager.Instance == null)
+        {
+            Debug.LogError("[GameTimer] MatchManager missing at match end. Cannot finalize deterministically.");
+            return;
+        }
+
+        int playerOneScore = lol != null ? lol.CurrentScore : 0;
+        int playerTwoScore = lol2 != null ? lol2.CurrentScore : 0;
+
+        if (!MatchManager.Instance.TryGetOrderedPlayerWallets(out var playerOneWallet, out var playerTwoWallet))
+        {
+            MatchManager.Instance.ReportBrokenMatch(
+                "timer_end_missing_wallets",
+                $"score={playerOneScore}-{playerTwoScore}");
+            return;
+        }
+
+        if (playerOneScore > playerTwoScore)
+        {
+            MatchManager.Instance.ReportMatchResult(
+                playerOneWallet,
+                "timer_end_points",
+                $"score={playerOneScore}-{playerTwoScore}");
+        }
+        else if (playerTwoScore > playerOneScore)
+        {
+            MatchManager.Instance.ReportMatchResult(
+                playerTwoWallet,
+                "timer_end_points",
+                $"score={playerOneScore}-{playerTwoScore}");
+        }
+        else
+        {
+            MatchManager.Instance.ReportBrokenMatch(
+                "timer_end_draw",
+                $"score={playerOneScore}-{playerTwoScore}");
+        }
+    }
+#endif
 }

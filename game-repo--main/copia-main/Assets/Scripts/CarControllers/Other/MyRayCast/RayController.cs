@@ -235,6 +235,7 @@ public class RayController : MonoBehaviour
     }
     void OnGUI()
     {
+        if (Application.isMobilePlatform) return;
         GUI.Label(new Rect(30.0f, 20.0f, 150, 130), string.Format("{0:F2} m/s {1:F0} uu/s", forwardSpeed, forwardSpeed * 100), style);
         GUI.Label(new Rect(30.0f, 40.0f, 150, 130), string.Format("turnRadius: {0:F2} m curvature: {1:F4}", turnRadius, curvature), style);
         GUI.Label(new Rect(30.0f, 60.0f, 150, 130), string.Format("ackerLeft: {0:F4} m ackerRight: {1:F4}", ackermannAngleLeft, ackermannAngleRight), style);

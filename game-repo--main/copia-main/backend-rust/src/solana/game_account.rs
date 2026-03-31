@@ -24,8 +24,8 @@ pub struct DecodedGameAccount {
     pub state: DecodedGameState,
     pub created_at: i64,
     pub joined_at: i64,
-    pub bump: u8,
-    pub vault_bump: u8,
+    pub _bump: u8,
+    pub _vault_bump: u8,
 }
 
 pub fn decode_game_account(data: &[u8]) -> Result<DecodedGameAccount> {
@@ -69,8 +69,8 @@ pub fn decode_game_account(data: &[u8]) -> Result<DecodedGameAccount> {
         state,
         created_at,
         joined_at,
-        bump,
-        vault_bump,
+        _bump: bump,
+        _vault_bump: vault_bump,
     })
 }
 

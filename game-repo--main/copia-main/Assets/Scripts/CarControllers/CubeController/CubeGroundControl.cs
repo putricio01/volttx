@@ -3,6 +3,7 @@ using Unity.Netcode;
 
 [RequireComponent(typeof(CubeController))]
 public class CubeGroundControl : NetworkBehaviour
+    , ITickSimulatable
 {
     [Header("Steering")]
     [Range(0,100)]
@@ -35,6 +36,13 @@ public class CubeGroundControl : NetworkBehaviour
     
     private void FixedUpdate()
     {
+        SimulateNetworkTick();
+    }
+
+    public int TickOrder => TickSimulationOrder.GroundControl;
+
+    public void SimulateNetworkTick()
+    {
         if (_inputManager == null) return;
 
         SetDriftFriction();
@@ -50,7 +58,7 @@ public class CubeGroundControl : NetworkBehaviour
     {
         // Sliding / drifting, lowers the wheel side friction when drifting
         var currentDriftDrag = _inputManager.isDrift ? wheelSideFrictionDrift : wheelSideFriction;
-        currentWheelSideFriction = Mathf.MoveTowards(currentWheelSideFriction, currentDriftDrag, Time.deltaTime * driftTime);
+        currentWheelSideFriction = Mathf.MoveTowards(currentWheelSideFriction, currentDriftDrag, Time.fixedDeltaTime * driftTime);
     }
 
     private void ApplyWheelForwardForce(float forwardAcceleration)

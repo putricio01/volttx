@@ -2,7 +2,7 @@
 using UnityEngine;
 
 
-public class CubeSphereCollider : MonoBehaviour
+public class CubeSphereCollider : MonoBehaviour, ITickSimulatable
 {
     public bool isTouchingSurface = false;
     
@@ -19,6 +19,13 @@ public class CubeSphereCollider : MonoBehaviour
     }
     
     private void FixedUpdate()
+    {
+        SimulateNetworkTick();
+    }
+
+    public int TickOrder => TickSimulationOrder.SurfaceContacts;
+
+    public void SimulateNetworkTick()
     {
         isTouchingSurface = IsRayContact() || _isColliderContact;
         

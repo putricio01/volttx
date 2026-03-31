@@ -25696,6 +25696,8 @@ GameObject:
   - component: {fileID: 1596666843314730561}
   - component: {fileID: 4810589113164649566}
   - component: {fileID: 5074825755680038228}
+  - component: {fileID: 4943632975463242336}
+  - component: {fileID: 3803421062378373645}
   m_Layer: 8
   m_Name: CubeController
   m_TagString: Player
@@ -25730,6 +25732,7 @@ Transform:
   - {fileID: 7853447340785651368}
   - {fileID: 7444496182579978207}
   - {fileID: 7622900750781905958}
+  - {fileID: 8110121734659610568}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1844519987634339421
@@ -25744,7 +25747,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 328035445
+  GlobalObjectIdHash: 3226981242
   InScenePlacedSourceGlobalObjectIdHash: 3226981242
   DeferredDespawnTick: 0
   Ownership: 1
@@ -25963,6 +25966,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ShowTopMostFoldoutHeaderGroup: 1
   vcc: {fileID: 2216468058416179698}
+  useFixedOwnerCamera: 1
+  lockOwnerCameraBehindTarget: 1
+  lockedVerticalAxis: 0.5
+  headingRecenteringWaitTime: 0
+  headingRecenteringTime: 0.2
   spawnPoints:
   - {fileID: 4641177395405248810}
   - {fileID: 6142720030616562262}
@@ -25990,9 +25998,10 @@ MonoBehaviour:
   isJumpUp: 0
   isJumpDown: 0
   useJoystickInput: 1
+  serverMode: 0
   joystickMoveInput: {x: 0, y: 0}
-  bust: {fileID: 0}
-  jomp: {fileID: 0}
+  bust: {fileID: 6217763673077740198}
+  jomp: {fileID: 3207264785016276388}
   axisName: Horizontal
   sensitivityCurve:
     serializedVersion: 2
@@ -26013,10 +26022,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CarNetworkController
   ShowTopMostFoldoutHeaderGroup: 1
-  positionErrorThreshold: 0.1
-  rotationErrorThreshold: 2
-  correctionSmoothTime: 0.1
-  stateSendInterval: 2
+  positionErrorThreshold: 0.18
+  rotationErrorThreshold: 3.5
+  hardSnapThreshold: 4.5
+  stateSendInterval: 1
+  inputSendInterval: 1
+  inputRedundancyCount: 6
+  maxFutureInputTicks: 2
+  interpolationBackTimeMs: 75
+  maxRemoteSnapshots: 32
+  ownerCorrectionSmoothingTime: 0.08
+  cameraFollowAnchor: {fileID: 8110121734659610568}
 --- !u!114 &5074825755680038228
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -26029,6 +26045,31 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fa81a723e5be54fb2a40bd2844ce76ee, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CarStateCapture
+--- !u!114 &4943632975463242336
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1258923820049204481}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 53b7474999734e2abcf81c9048ce5f01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TickRunner
+--- !u!114 &3803421062378373645
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1258923820049204481}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c42c95b0d7fa34441bfd85127db29dd1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerLobbyNet
+  ShowTopMostFoldoutHeaderGroup: 1
 --- !u!1 &1258923820377307570
 GameObject:
   m_ObjectHideFlags: 0
@@ -26504,9 +26545,10 @@ MonoBehaviour:
   isJumpUp: 0
   isJumpDown: 0
   useJoystickInput: 0
+  serverMode: 0
   joystickMoveInput: {x: 0, y: 0}
-  bust: {fileID: 6217763673077740198}
-  jomp: {fileID: 3207264785016276388}
+  bust: {fileID: 0}
+  jomp: {fileID: 0}
   axisName: Horizontal
   sensitivityCurve:
     serializedVersion: 2
@@ -27565,6 +27607,37 @@ MonoBehaviour:
   m_BiasX: 0
   m_BiasY: 0
   m_CenterOnActivate: 1
+--- !u!1 &6973425302907726312
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8110121734659610568}
+  m_Layer: 0
+  m_Name: CameraAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8110121734659610568
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6973425302907726312}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1258923820049204482}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &8225020878119001765
 GameObject:
   m_ObjectHideFlags: 0
@@ -27711,8 +27784,8 @@ MonoBehaviour:
   m_StreamingVersion: 20170927
   m_Priority: 10
   m_StandbyUpdate: 2
-  m_LookAt: {fileID: 1258923819829248025}
-  m_Follow: {fileID: 1258923819829248025}
+  m_LookAt: {fileID: 8110121734659610568}
+  m_Follow: {fileID: 8110121734659610568}
   m_CommonLens: 1
   m_Lens:
     FieldOfView: 70
@@ -28128,7 +28201,7 @@ PrefabInstance:
     - target: {fileID: 1663187150, guid: 2f7f3dde7ae722a4aafffe20691ad702, type: 3}
       propertyPath: inputManager
       value: 
-      objectReference: {fileID: 6872415982155855000}
+      objectReference: {fileID: 1596666843314730561}
     - target: {fileID: 166868854162214642, guid: 2f7f3dde7ae722a4aafffe20691ad702,
         type: 3}
       propertyPath: buttonStateOutputEvent.m_PersistentCalls.m_Calls.Array.data[0].m_CallState
@@ -28302,39 +28375,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d0b148fe25e99eb48b9724523833bab1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Delegates:
-  - eventID: 2
-    callback:
-      m_PersistentCalls:
-        m_Calls:
-        - m_Target: {fileID: 6872415982155855000}
-          m_TargetAssemblyTypeName: InputManager, Assembly-CSharp
-          m_MethodName: OnJumpButtonClicked
-          m_Mode: 6
-          m_Arguments:
-            m_ObjectArgument: {fileID: 0}
-            m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-            m_IntArgument: 0
-            m_FloatArgument: 0
-            m_StringArgument: 
-            m_BoolArgument: 1
-          m_CallState: 2
-  - eventID: 3
-    callback:
-      m_PersistentCalls:
-        m_Calls:
-        - m_Target: {fileID: 6872415982155855000}
-          m_TargetAssemblyTypeName: InputManager, Assembly-CSharp
-          m_MethodName: OnJumpButtonClicked
-          m_Mode: 6
-          m_Arguments:
-            m_ObjectArgument: {fileID: 0}
-            m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-            m_IntArgument: 0
-            m_FloatArgument: 0
-            m_StringArgument: 
-            m_BoolArgument: 0
-          m_CallState: 2
+  m_Delegates: []
 --- !u!114 &3207264785016276388 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 8448885315213137009, guid: 2f7f3dde7ae722a4aafffe20691ad702,
@@ -28383,36 +28424,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d0b148fe25e99eb48b9724523833bab1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Delegates:
-  - eventID: 2
-    callback:
-      m_PersistentCalls:
-        m_Calls:
-        - m_Target: {fileID: 6872415982155855000}
-          m_TargetAssemblyTypeName: InputManager, Assembly-CSharp
-          m_MethodName: SetBoost
-          m_Mode: 6
-          m_Arguments:
-            m_ObjectArgument: {fileID: 0}
-            m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-            m_IntArgument: 0
-            m_FloatArgument: 0
-            m_StringArgument: 
-            m_BoolArgument: 1
-          m_CallState: 1
-  - eventID: 3
-    callback:
-      m_PersistentCalls:
-        m_Calls:
-        - m_Target: {fileID: 6872415982155855000}
-          m_TargetAssemblyTypeName: InputManager, Assembly-CSharp
-          m_MethodName: SetBoost
-          m_Mode: 6
-          m_Arguments:
-            m_ObjectArgument: {fileID: 0}
-            m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-            m_IntArgument: 0
-            m_FloatArgument: 0
-            m_StringArgument: 
-            m_BoolArgument: 0
-          m_CallState: 1
+  m_Delegates: []

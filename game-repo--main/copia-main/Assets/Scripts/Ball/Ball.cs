@@ -7,17 +7,24 @@ using Unity.Netcode;
 /// Ball physics — server authoritative.
 /// Server: runs full physics, handles collisions.
 /// Client: Rigidbody is kinematic, position comes from BallNetworkController interpolation.
+///
+/// Car-ball collision is handled via OverlapSphere (not OnCollisionEnter) because
+/// Physics.IgnoreCollision is active between cars and ball on ALL instances.
+/// This prevents Unity's automatic collision response from tilting the car.
 /// </summary>
 public class Ball : NetworkBehaviour
 {
     [SerializeField] [Range(10, 80)] float randomSpeed = 40;
     [SerializeField] float initialForce = 400;
     [SerializeField] float hitMultiplier = 50;
+    [SerializeField] float hitDetectionRadius = 1.5f;
+    [SerializeField] float hitCooldown = 0.15f;
 
     private bool isTouchedGround = false;
 
     Rigidbody _rb;
     Transform _transform;
+    float _lastHitTime;
 
     void Start()
     {
@@ -26,7 +33,7 @@ public class Ball : NetworkBehaviour
         isTouchedGround = false;
     }
 
-#if UNITY_EDITOR
+#if UNITY_EDITOR && ENABLE_LEGACY_INPUT_MANAGER
     void Update()
     {
         // Dev-only input for testing
@@ -70,44 +77,58 @@ public class Ball : NetworkBehaviour
     }
 
     /// <summary>
-    /// Server-only collision handling. No more ownership transfer —
-    /// the server owns the ball at all times.
-    /// Uses a blend of car velocity direction and push-away direction
-    /// for more natural-feeling ball physics.
+    /// Server-only: detect nearby cars via OverlapSphere and apply hit force.
+    /// This replaces OnCollisionEnter for car detection because Physics.IgnoreCollision
+    /// is now active between ball and all cars (to prevent car tilting).
+    /// Ground/wall collisions still use OnCollisionEnter normally.
     /// </summary>
-    private void OnCollisionEnter(Collision col)
+    void FixedUpdate()
     {
-        // Only the server processes ball collisions
         if (!IsServer) return;
 
-        Rigidbody colRb = col.rigidbody;
-        bool hitPlayer = false;
-        if (colRb != null)
-        {
-            // Use Rigidbody/root tag so hits register from any child collider
-            hitPlayer = colRb.CompareTag("Player");
-        }
-        else
-        {
-            hitPlayer = col.transform.root.CompareTag("Player");
-        }
+        // Cooldown to prevent multiple hits per contact
+        if (Time.time - _lastHitTime < hitCooldown) return;
 
-        if (hitPlayer)
+        Collider[] hits = Physics.OverlapSphere(_transform.position, hitDetectionRadius);
+        foreach (Collider hit in hits)
         {
-            float carSpeed = colRb != null ? colRb.linearVelocity.magnitude : 0f;
+            Rigidbody hitRb = hit.attachedRigidbody;
+            if (hitRb == null) continue;
+
+            // Check root tag — car children (wheels, body) share the root Player tag
+            if (!hitRb.CompareTag("Player")) continue;
+
+            float carSpeed = hitRb.linearVelocity.magnitude;
             float force = initialForce + carSpeed * hitMultiplier;
 
             // Blend car's velocity direction (where the car is going) with
             // push-away direction (ball away from car center) for natural feel.
             // At high speed: mostly velocity-based (like a real hit)
             // At low speed: mostly push-away (like a nudge)
-            Vector3 pushAway = (_transform.position - col.transform.position).normalized;
-            Vector3 carDir = (colRb != null && carSpeed > 1f) ? colRb.linearVelocity.normalized : pushAway;
-            float velocityBlend = Mathf.Clamp01(carSpeed / 20f); // full blend at 20+ speed
+            Vector3 pushAway = (_transform.position - hitRb.position).normalized;
+            Vector3 carDir = carSpeed > 1f ? hitRb.linearVelocity.normalized : pushAway;
+            float velocityBlend = Mathf.Clamp01(carSpeed / 20f);
             Vector3 hitDir = Vector3.Lerp(pushAway, carDir, velocityBlend).normalized;
 
             _rb.AddForce(hitDir * force);
+
+            // Notify the car's owning client about the impact
+            var carNet = hitRb.GetComponent<CarNetworkController>();
+            if (carNet != null)
+                carNet.ServerNotifyBallImpact();
+
+            _lastHitTime = Time.time;
+            break; // one hit per tick max
         }
+    }
+
+    /// <summary>
+    /// Server-only: ground/wall collisions still use OnCollisionEnter.
+    /// Car collisions are handled in FixedUpdate via OverlapSphere.
+    /// </summary>
+    private void OnCollisionEnter(Collision col)
+    {
+        if (!IsServer) return;
 
         if (col.gameObject.CompareTag("Ground"))
         {

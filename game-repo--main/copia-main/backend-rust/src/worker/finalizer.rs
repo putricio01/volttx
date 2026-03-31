@@ -4,6 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use sha2::{Digest, Sha256};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
+    bpf_loader_upgradeable,
     hash::Hash,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -15,7 +16,7 @@ use solana_sdk::{
 use crate::{
     app_state::AppState,
     db::chain_jobs as chain_jobs_db,
-    models::enums::{ChainJobType, MatchStatus},
+    models::enums::{ChainJobStatus, ChainJobType, MatchStatus},
     solana::{
         client::fetch_and_decode_game_account_with_client,
         game_account::{DecodedGameAccount, DecodedGameState},
@@ -112,15 +113,41 @@ async fn process_claimed_job(
     authority: &Keypair,
     job: &chain_jobs_db::ClaimedFinalizerJob,
 ) -> Result<()> {
-    let decoded =
-        fetch_and_decode_game_account_with_client(rpc, &state.config.program_id, &job.game_pda)
-            .await
-            .with_context(|| {
+    if try_recover_submitted_job(state, rpc, job).await? {
+        return Ok(());
+    }
+
+    let decoded = match fetch_and_decode_game_account_with_client(
+        rpc,
+        &state.config.program_id,
+        &job.game_pda,
+    )
+    .await
+    {
+        Ok(decoded) => decoded,
+        Err(e) => {
+            if job.chain_job_status == ChainJobStatus::Submitted && job.last_tx_sig.is_some() {
+                let error_text = format!(
+                    "submitted job could not fetch/decode game account after signature recovery check (possible closed account before RPC status visibility): {e:#}"
+                );
+                tracing::warn!(
+                    match_id = job.match_id,
+                    signature = %job.last_tx_sig.as_deref().unwrap_or(""),
+                    "{}",
+                    error_text
+                );
+                schedule_retry_or_fail(state, job, &error_text, false).await?;
+                return Ok(());
+            }
+
+            return Err(e).with_context(|| {
                 format!(
                     "failed to fetch/decode game account for match {}",
                     job.match_id
                 )
-            })?;
+            });
+        }
+    };
 
     if decoded.authority != authority.pubkey() {
         chain_jobs_db::mark_job_failed(
@@ -236,6 +263,75 @@ async fn process_claimed_job(
     Ok(())
 }
 
+async fn try_recover_submitted_job(
+    state: &AppState,
+    rpc: &RpcClient,
+    job: &chain_jobs_db::ClaimedFinalizerJob,
+) -> Result<bool> {
+    if job.chain_job_status != ChainJobStatus::Submitted {
+        return Ok(false);
+    }
+
+    let Some(last_tx_sig) = job.last_tx_sig.as_deref() else {
+        // Keep compatibility with older/inconsistent rows; fall back to decode-driven handling.
+        tracing::warn!(
+            match_id = job.match_id,
+            "submitted chain job has no last_tx_sig; falling back to account decode path"
+        );
+        return Ok(false);
+    };
+
+    let signature = Signature::from_str(last_tx_sig).with_context(|| {
+        format!(
+            "invalid last_tx_sig on submitted chain job: {}",
+            last_tx_sig
+        )
+    })?;
+
+    let statuses = rpc
+        .get_signature_statuses(&[signature])
+        .await
+        .with_context(|| format!("failed to fetch signature status for {}", last_tx_sig))?;
+
+    let Some(status_opt) = statuses.value.first() else {
+        return Ok(false);
+    };
+
+    let Some(status) = status_opt else {
+        // Signature may not be visible yet (or RPC history may be behind); try normal flow next.
+        return Ok(false);
+    };
+
+    if let Some(err) = &status.err {
+        schedule_retry_or_fail(
+            state,
+            job,
+            &format!("previous submitted transaction failed on-chain: {err:?}"),
+            false,
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    let final_match_status = final_match_status_for_job_type(job.job_type);
+    chain_jobs_db::mark_job_confirmed_and_finalize_match(
+        &state.pool,
+        job.match_id,
+        job.lock_token,
+        Some(last_tx_sig),
+        final_match_status,
+    )
+    .await?;
+
+    tracing::info!(
+        match_id = job.match_id,
+        final_status = ?final_match_status,
+        signature = %last_tx_sig,
+        "recovered submitted chain job from existing signature status"
+    );
+    Ok(true)
+}
+
 async fn schedule_retry_or_fail(
     state: &AppState,
     job: &chain_jobs_db::ClaimedFinalizerJob,
@@ -293,6 +389,13 @@ fn load_authority_keypair(state: &AppState) -> Result<Keypair> {
         .map_err(|e| anyhow!("read_keypair_file failed: {e}"))
 }
 
+fn final_match_status_for_job_type(job_type: ChainJobType) -> MatchStatus {
+    match job_type {
+        ChainJobType::Settle => MatchStatus::Settled,
+        ChainJobType::ForceRefund => MatchStatus::Refunded,
+    }
+}
+
 fn build_finalization_instruction(
     program_id: Pubkey,
     authority_pubkey: Pubkey,
@@ -301,6 +404,7 @@ fn build_finalization_instruction(
 ) -> Result<(Instruction, MatchStatus)> {
     let game_pda = Pubkey::from_str(&job.game_pda).context("invalid game_pda in DB")?;
     let vault_pda = Pubkey::from_str(&job.vault_pda).context("invalid vault_pda in DB")?;
+    let program_data_pda = bpf_loader_upgradeable::get_program_data_address(&program_id);
 
     match job.job_type {
         ChainJobType::Settle => {
@@ -329,6 +433,8 @@ fn build_finalization_instruction(
                     AccountMeta::new(game_pda, false),
                     AccountMeta::new(vault_pda, false),
                     AccountMeta::new(winner, false),
+                    AccountMeta::new_readonly(program_id, false),
+                    AccountMeta::new_readonly(program_data_pda, false),
                     AccountMeta::new_readonly(authority_pubkey, true),
                     AccountMeta::new_readonly(system_program::id(), false),
                 ],
@@ -360,6 +466,8 @@ fn build_finalization_instruction(
                     AccountMeta::new(vault_pda, false),
                     AccountMeta::new(game.player1, false),
                     AccountMeta::new(player2_for_accounts, false),
+                    AccountMeta::new_readonly(program_id, false),
+                    AccountMeta::new_readonly(program_data_pda, false),
                     AccountMeta::new_readonly(authority_pubkey, true),
                     AccountMeta::new_readonly(system_program::id(), false),
                 ],

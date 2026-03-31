@@ -16,7 +16,10 @@ public class UICanvasControllerInput : MonoBehaviour
     {
         if (inputManager != null)
         {
-            inputManager.joystickMoveInput = virtualMoveDirection;
+            if (!float.IsFinite(virtualMoveDirection.x) || !float.IsFinite(virtualMoveDirection.y))
+                virtualMoveDirection = Vector2.zero;
+
+            inputManager.joystickMoveInput = Vector2.ClampMagnitude(virtualMoveDirection, 1f);
         }
     }
 

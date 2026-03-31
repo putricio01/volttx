@@ -70,3 +70,14 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Project-specific generated files
+.DS_Store
+target/
+*_BurstDebugInformation_DoNotShip/
+tempburstlibs/
+**/[Bb]uild/
+**/[Bb]uilds/
+game-repo--main/copia-main/Assets/Screenshots/
+game-repo--main/copia-main/Assets/Screenshots.meta
+game-repo--main/copia-main/backend-rust/.env

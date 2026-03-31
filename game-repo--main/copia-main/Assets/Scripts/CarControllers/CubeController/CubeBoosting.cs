@@ -3,6 +3,7 @@ using Unity.Netcode;
 
 [RequireComponent(typeof(CubeController))]
 public class CubeBoosting : NetworkBehaviour
+    , ITickSimulatable
 {
     public float BoostForceMultiplier = 1f;
     const float BoostForce = 991 / 100;
@@ -39,6 +40,13 @@ public class CubeBoosting : NetworkBehaviour
     }
 
     void FixedUpdate()
+    {
+        SimulateNetworkTick();
+    }
+
+    public int TickOrder => TickSimulationOrder.Boosting;
+
+    public void SimulateNetworkTick()
     {
         Boosting();
     }

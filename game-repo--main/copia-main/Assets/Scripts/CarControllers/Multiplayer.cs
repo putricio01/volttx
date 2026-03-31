@@ -53,6 +53,7 @@ namespace Kart {
 
             Instance = this;
             DontDestroyOnLoad(this);
+            ApplyDirectConnectDefaults();
 
             // Only authenticate and set up lobby timers on clients, not on the server editor.
             // Check NetworkManager — if it's already running as server, skip client-only setup.
@@ -125,10 +126,8 @@ namespace Kart {
             TransportConfig.ApplyTransportConfig(force: true);
 
             var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            // For local/direct connections, use raw UDP (not WebSocket/Relay)
-            if (ip == "127.0.0.1" || ip == "localhost") {
-                transport.UseWebSockets = false;
-            }
+            // Dedicated server direct-connect uses raw UDP for localhost, LAN, and VPS IPs.
+            transport.UseWebSockets = false;
             // Keep client physics step consistent with server/editor test setup.
             Time.fixedDeltaTime = 1f / 60f;
             transport.SetConnectionData(ip, port);
@@ -205,6 +204,15 @@ namespace Kart {
         /// </summary>
         public void DirectConnect(string ip = null, ushort port = 0) {
             ConnectToServer(ip ?? defaultServerIp, port == 0 ? defaultServerPort : port);
+        }
+
+        void ApplyDirectConnectDefaults()
+        {
+            var cfg = GameConfig.Load();
+            if (cfg == null) return;
+
+            defaultServerIp = cfg.GetDirectConnectIp();
+            defaultServerPort = cfg.GetDirectConnectPort();
         }
 
         // ====================================================================

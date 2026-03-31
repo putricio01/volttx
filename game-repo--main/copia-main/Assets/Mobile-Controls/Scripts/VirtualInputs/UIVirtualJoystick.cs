@@ -6,7 +6,7 @@ public class UIVirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandle
 {
     [System.Serializable]
     public class Event : UnityEvent<Vector2> { }
-    
+
     [Header("Rect References")]
     public RectTransform containerRect;
     public RectTransform handleRect;
@@ -17,17 +17,53 @@ public class UIVirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandle
     public bool invertXOutputValue;
     public bool invertYOutputValue;
 
+    [Header("WASD Snap Mode")]
+    [Tooltip("Snap output to -1, 0, or +1 per axis (like WASD keys)")]
+    public bool wasdSnapMode = false;
+    [Tooltip("Normalized threshold (0-1) before axis snaps to 1/-1")]
+    public float snapThreshold = 0.3f;
+
+    [Header("Analog Mode (when WASD snap is off)")]
+    [Tooltip("Ignore input below this magnitude (0-1)")]
+    public float deadzone = 0.06f;
+    [Tooltip("When enabled, analog output eases toward the target instead of matching the finger immediately")]
+    public bool smoothAnalogOutput;
+    [Tooltip("Smooth input over time for less jitter")]
+    public float smoothSpeed = 15f;
+
     [Header("Output")]
     public Event joystickOutputEvent;
+
+    Vector2 _currentOutput;
+    Vector2 _targetOutput;
+    bool _isTouching;
 
     void Start()
     {
         SetupHandle();
     }
 
+    void Update()
+    {
+        if (wasdSnapMode)
+        {
+            // Immediate: no smoothing, no lerp. Output matches target exactly.
+            _currentOutput = _isTouching ? _targetOutput : Vector2.zero;
+        }
+        else
+        {
+            Vector2 target = _isTouching ? _targetOutput : Vector2.zero;
+            if (smoothAnalogOutput && smoothSpeed > 0f)
+                _currentOutput = Vector2.Lerp(_currentOutput, target, Time.unscaledDeltaTime * smoothSpeed);
+            else
+                _currentOutput = target;
+        }
+        OutputPointerEventValue(_currentOutput);
+    }
+
     private void SetupHandle()
     {
-        if(handleRect)
+        if (handleRect)
         {
             UpdateHandleRectPosition(Vector2.zero);
         }
@@ -35,36 +71,60 @@ public class UIVirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandle
 
     public void OnPointerDown(PointerEventData eventData)
     {
+        _isTouching = true;
         OnDrag(eventData);
     }
 
     public void OnDrag(PointerEventData eventData)
     {
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(containerRect, eventData.position, eventData.pressEventCamera, out Vector2 localPos);
 
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(containerRect, eventData.position, eventData.pressEventCamera, out Vector2 position);
-        
-        position = ApplySizeDelta(position);
-        
-        Vector2 clampedPosition = ClampValuesToMagnitude(position);
+        // Normalize to -1..1 range
+        Vector2 normalized = ApplySizeDelta(localPos);
+        Vector2 clamped = ClampValuesToMagnitude(normalized);
 
-        Vector2 outputPosition = ApplyInversionFilter(position);
-
-        OutputPointerEventValue(outputPosition * magnitudeMultiplier);
-
-        if(handleRect)
+        Vector2 output;
+        if (wasdSnapMode)
         {
-            UpdateHandleRectPosition(clampedPosition * joystickRange);
+            // Snap each axis independently to -1, 0, or +1
+            float snappedX = Mathf.Abs(clamped.x) > snapThreshold ? Mathf.Sign(clamped.x) : 0f;
+            float snappedY = Mathf.Abs(clamped.y) > snapThreshold ? Mathf.Sign(clamped.y) : 0f;
+            output = new Vector2(snappedX, snappedY);
         }
-        
+        else
+        {
+            // Analog mode: deadzone + remap
+            if (clamped.magnitude < deadzone)
+            {
+                output = Vector2.zero;
+            }
+            else
+            {
+                float remapped = (clamped.magnitude - deadzone) / (1f - deadzone);
+                output = clamped.normalized * remapped;
+            }
+        }
+
+        output = ApplyInversionFilter(output);
+        _targetOutput = output * magnitudeMultiplier;
+
+        // Handle visual always follows finger smoothly (regardless of snap mode)
+        if (handleRect)
+        {
+            Vector2 handlePos = Vector2.ClampMagnitude(localPos, joystickRange);
+            UpdateHandleRectPosition(handlePos);
+        }
     }
 
     public void OnPointerUp(PointerEventData eventData)
     {
-        OutputPointerEventValue(Vector2.zero);
+        _isTouching = false;
+        _targetOutput = Vector2.zero;
+        _currentOutput = Vector2.zero;
 
-        if(handleRect)
+        if (handleRect)
         {
-             UpdateHandleRectPosition(Vector2.zero);
+            UpdateHandleRectPosition(Vector2.zero);
         }
     }
 
@@ -79,38 +139,11 @@ public class UIVirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandle
     }
 
     Vector2 ApplySizeDelta(Vector2 position)
-{
-    float x;  
-    if (position.x / containerRect.sizeDelta.x > 0)
     {
-        x = 1f;
+        float x = containerRect.sizeDelta.x > 0 ? position.x / (containerRect.sizeDelta.x * 0.5f) : 0f;
+        float y = containerRect.sizeDelta.y > 0 ? position.y / (containerRect.sizeDelta.y * 0.5f) : 0f;
+        return new Vector2(x, y);
     }
-    else if (position.x / containerRect.sizeDelta.x < 0)
-    {
-        x = -1f;
-    }
-    else
-    {
-        x = 0f;
-    }
-
-    float y;  
-    if (position.y / containerRect.sizeDelta.y > 0)
-    {
-        y = 1f;
-    }
-    else if (position.y / containerRect.sizeDelta.y < 0)
-    {
-        y = -1f;
-    }
-    else
-    {
-        y = 0f;
-    }
-
-    return new Vector2(x, y);
-}
-
 
     Vector2 ClampValuesToMagnitude(Vector2 position)
     {
@@ -119,22 +152,8 @@ public class UIVirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandle
 
     Vector2 ApplyInversionFilter(Vector2 position)
     {
-        if(invertXOutputValue)
-        {
-            position.x = InvertValue(position.x);
-        }
-
-        if(invertYOutputValue)
-        {
-            position.y = InvertValue(position.y);
-        }
-
+        if (invertXOutputValue) position.x = -position.x;
+        if (invertYOutputValue) position.y = -position.y;
         return position;
     }
-
-    float InvertValue(float value)
-    {
-        return -value;
-    }
-    
 }

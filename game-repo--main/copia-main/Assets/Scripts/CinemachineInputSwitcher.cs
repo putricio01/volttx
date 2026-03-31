@@ -3,13 +3,21 @@ using Cinemachine;
 
 /// <summary>
 /// Client-only: Switches Cinemachine FreeLook between joystick and mouse/touch input.
-/// Safe on server (null-checks prevent errors when cameras/UI are disabled).
+/// On mobile, camera is now handled by MobileCameraTouch — this only runs on desktop.
 /// </summary>
 public class CinemachineInputSwitcher : MonoBehaviour
 {
     public CinemachineFreeLook freeLookCamera;
     public Joystick joystick;
     private bool usingJoystick = false;
+
+    private void Start()
+    {
+#if UNITY_ANDROID || UNITY_IOS
+        // On mobile, MobileCameraTouch handles camera. Disable this.
+        enabled = false;
+#endif
+    }
 
     private void Update()
     {

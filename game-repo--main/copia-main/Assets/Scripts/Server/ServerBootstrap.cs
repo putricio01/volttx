@@ -21,6 +21,16 @@ public class ServerBootstrap : MonoBehaviour
         // Disable all rendering and audio (server is headless)
         DisableClientOnlyObjects();
 
+        // Create server-only singletons at runtime
+        // (these scripts are #if UNITY_SERVER so they can't be placed in editor)
+        var mmGo = new GameObject("MatchManager");
+        mmGo.AddComponent<MatchManager>();
+        DontDestroyOnLoad(mmGo);
+
+        var hbGo = new GameObject("ServerPoolHeartbeat");
+        hbGo.AddComponent<ServerPoolHeartbeat>();
+        DontDestroyOnLoad(hbGo);
+
         // Check for port override from environment (cloud hosting)
         string portEnv = System.Environment.GetEnvironmentVariable("PORT");
         if (!string.IsNullOrEmpty(portEnv) && ushort.TryParse(portEnv, out ushort envPort))
@@ -31,6 +41,7 @@ public class ServerBootstrap : MonoBehaviour
 
         // Configure transport to listen for direct connections
         var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+        transport.UseWebSockets = false;
         transport.SetConnectionData("0.0.0.0", port);
 
         // Register callbacks
@@ -47,6 +58,10 @@ public class ServerBootstrap : MonoBehaviour
     {
         int playerCount = NetworkManager.Singleton.ConnectedClients.Count;
         Debug.Log($"[Server] Client {clientId} connected. Total players: {playerCount}");
+
+        // Mark server as busy once first player connects
+        if (ServerPoolHeartbeat.Instance != null && playerCount == 1)
+            ServerPoolHeartbeat.Instance.MarkBusy();
     }
 
     void OnClientDisconnected(ulong clientId)
@@ -54,11 +69,9 @@ public class ServerBootstrap : MonoBehaviour
         int playerCount = NetworkManager.Singleton.ConnectedClients.Count;
         Debug.Log($"[Server] Client {clientId} disconnected. Remaining players: {playerCount}");
 
-        // If a player disconnects during a match, the remaining player wins
-        if (playerCount <= 1 && playerCount > 0)
-        {
-            Debug.Log("[Server] Only one player remaining. Match may end.");
-        }
+        // Delegate disconnect handling to MatchManager
+        if (MatchManager.Instance != null)
+            MatchManager.Instance.OnPlayerDisconnected(clientId);
     }
 
     void DisableClientOnlyObjects()

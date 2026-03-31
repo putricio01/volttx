@@ -1,74 +1,37 @@
-# backend-rust (MVP scaffold)
+# backend-rust (thin finalizer MVP)
 
-This folder is a **Rust backend scaffold** for your 1v1 Solana-bet match flow.
+This backend is intentionally minimal:
 
-It includes:
-- `axum` HTTP route skeletons for the 7 MVP endpoints
-- `sqlx` Postgres connection + startup migrations
-- Postgres migration file with `matches`, `chain_jobs`, `used_nonces`
-- Worker task stubs (`finalizer`, `timeout_watcher`)
+- One internal endpoint: `POST /v1/finalize`
+- HMAC auth + nonce replay protection
+- Postgres-backed `chain_jobs` queue
+- Finalizer worker that sends `settle_game` / `force_refund`
 
-It does **not** yet include:
-- real Solana RPC calls
-- PDA derivation
-- Anchor account decoding
-- HMAC verification logic
-- actual DB query implementations
+Client wallets should call `create_game` and `join_game` directly from Unity.
 
-## What is `axum`?
+## Responsibilities
 
-`axum` is a Rust web framework (similar role to `Express` in Node or `FastAPI` in Python).
+1. Trusted game server submits final outcome to `/v1/finalize`.
+2. Backend verifies on-chain `Game` account state.
+3. Backend upserts minimal `matches` metadata from chain data.
+4. Backend enqueues a `chain_jobs` record.
+5. Finalizer worker signs and submits settlement/refund using `AUTHORITY_KEYPAIR_PATH`.
 
-You use it to define routes like:
-- `POST /v1/matches`
-- `GET /v1/matches/{id}/status`
+## Required env vars
 
-In this scaffold, route handlers live in:
-- `src/api/matches.rs`
-- `src/api/admin.rs`
+- `APP_BIND_ADDR`
+- `DATABASE_URL`
+- `SOLANA_RPC_URL`
+- `PROGRAM_ID`
+- `AUTHORITY_PUBKEY`
+- `AUTHORITY_KEYPAIR_PATH`
+- `INTERNAL_HMAC_SECRET`
+- `FINALIZER_POLL_MS`
 
-## What is `sqlx`?
+## Run locally
 
-`sqlx` is a Rust database library (similar role to a DB client/ORM layer).
+1. `cp .env.example .env`
+2. Ensure Postgres DB exists and is reachable via `DATABASE_URL`
+3. `cargo run`
 
-You use it to:
-- connect to Postgres (`PgPool`)
-- run SQL queries
-- run migrations
-
-In this scaffold:
-- startup opens a `PgPool`
-- `sqlx::migrate!("./migrations")` runs SQL files in `migrations/`
-
-## Why this structure?
-
-It matches the MVP responsibilities you defined:
-- API routes (`axum`) for Unity and internal result/admin calls
-- DB persistence (`sqlx`) so matches survive restarts
-- background workers for retries/timeouts
-- Solana module placeholders for settlement/refund integration
-
-## Run locally (after you add Postgres)
-
-1. Copy env file
-   - `cp .env.example .env`
-2. Start Postgres and create the DB `volttx_mvp`
-3. Run the backend
-   - `cargo run`
-
-On startup it will:
-- load `.env`
-- connect to Postgres
-- run migrations
-- start HTTP server
-- start worker stubs
-
-## Next implementation steps (in order)
-
-1. Implement `POST /v1/matches` DB insert + join code generation
-2. Add Solana PDA derivation helper (server-side expected `game_pda`/`vault_pda`)
-3. Implement `create-confirm` / `join-confirm` on-chain verification
-4. Implement `/result` -> create `chain_jobs` row
-5. Implement finalizer worker (`settle_game` / `force_refund`)
-6. Implement timeout watcher (`join_timeout -> force_refund`)
-
+Startup runs migrations automatically and starts the HTTP server + finalizer worker.
